@@ -150,13 +150,7 @@ namespace Backend.CMS.Infrastructure.Services
             var session = await _sessionRepository.FirstOrDefaultAsync(s =>
                 s.RefreshToken == refreshTokenDto.RefreshToken &&
                 !s.IsRevoked &&
-                s.ExpiresAt > DateTime.UtcNow);
-
-            if (session == null)
-            {
-                throw new UnauthorizedAccessException("Invalid refresh token");
-            }
-
+                s.ExpiresAt > DateTime.UtcNow) ?? throw new UnauthorizedAccessException("Invalid refresh token");
             var user = await _userRepository.GetByIdAsync(session.UserId);
             if (user == null || !user.IsActive)
             {

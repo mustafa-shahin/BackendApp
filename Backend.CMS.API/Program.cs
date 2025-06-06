@@ -8,7 +8,6 @@
     using Hangfire;
     using Hangfire.Dashboard;
     using Hangfire.PostgreSql;
-    using MediatR;
     using Microsoft.AspNetCore.Authentication.JwtBearer;
     using Microsoft.EntityFrameworkCore;
     using Microsoft.IdentityModel.Tokens;
@@ -57,12 +56,11 @@
             CountersAggregateInterval = TimeSpan.FromMinutes(5),
             PrepareSchemaIfNecessary = true,
             TransactionSynchronisationTimeout = TimeSpan.FromMinutes(5)
-            // Removed DashboardJobListLimit and TablesPrefix as they're not available in this version
         }));
 
     builder.Services.AddHangfireServer(options =>
     {
-        options.Queues = new[] { "default", "deployment", "template-sync", "maintenance" };
+        options.Queues = ["default", "deployment", "template-sync", "maintenance"];
         options.WorkerCount = Environment.ProcessorCount * 2;
     });
 
@@ -196,7 +194,7 @@
     // Configure Hangfire Dashboard
     app.UseHangfireDashboard("/jobs", new DashboardOptions
     {
-        Authorization = new[] { new HangfireAuthorizationFilter() },
+        Authorization = [new HangfireAuthorizationFilter()],
         DisplayStorageConnectionString = false,
         DashboardTitle = "Backend CMS Jobs"
     });

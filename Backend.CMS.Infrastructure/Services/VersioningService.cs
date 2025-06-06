@@ -241,9 +241,9 @@ namespace Backend.CMS.Infrastructure.Services
                 }
 
                 // Execute file system changes if any
-                if (version.MigrationData.ContainsKey("fileSystemChanges"))
+                if (version.MigrationData.TryGetValue("fileSystemChanges", out object? value))
                 {
-                    await ExecuteFileSystemChangesAsync(version.MigrationData["fileSystemChanges"]);
+                    await ExecuteFileSystemChangesAsync(value);
                 }
 
                 // Execute configuration updates if any
@@ -266,10 +266,10 @@ namespace Backend.CMS.Infrastructure.Services
             try
             {
                 // Execute rollback scripts in reverse order
-                if (rollbackVersion.MigrationData.ContainsKey("rollbackScripts"))
+                if (rollbackVersion.MigrationData.TryGetValue("rollbackScripts", out object? value))
                 {
                     var rollbackScripts = JsonSerializer.Deserialize<List<string>>(
-                        rollbackVersion.MigrationData["rollbackScripts"].ToString() ?? "[]");
+value.ToString() ?? "[]");
 
                     var scriptsToExecute = rollbackScripts?.AsEnumerable().Reverse().ToList() ?? new List<string>();
 
