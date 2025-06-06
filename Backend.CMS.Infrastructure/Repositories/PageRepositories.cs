@@ -1,119 +1,101 @@
-﻿using Backend.CMS.Domain.Common;
+﻿// File: Backend.CMS.Infrastructure/Repositories/PageRepository.cs
+using Backend.CMS.Domain.Entities;
+using Backend.CMS.Domain.Enums;
 using Backend.CMS.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
-using System.Linq.Expressions;
 
 namespace Backend.CMS.Infrastructure.Repositories
 {
-    public interface IRepository<T> where T : BaseEntity
+    public interface IPageRepository : IRepository<Page>
     {
-        Task<T?> GetByIdAsync(Guid id);
-        Task<IEnumerable<T>> GetAllAsync();
-        Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate);
-        Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate);
-        Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate);
-        Task<int> CountAsync(Expression<Func<T, bool>>? predicate = null);
-        Task<IEnumerable<T>> GetPagedAsync(int page, int pageSize, Expression<Func<T, bool>>? predicate = null);
-        Task<T> AddAsync(T entity);
-        Task<IEnumerable<T>> AddRangeAsync(IEnumerable<T> entities);
-        void Update(T entity);
-        void Remove(T entity);
-        void RemoveRange(IEnumerable<T> entities);
-        Task<int> SaveChangesAsync();
+        Task<Page?> GetBySlugAsync(string slug);
+        Task<IEnumerable<Page>> GetPublishedPagesAsync();
+        Task<IEnumerable<Page>> GetPageHierarchyAsync();
+        Task<IEnumerable<Page>> GetChildPagesAsync(Guid parentPageId);
+        Task<Page?> GetWithComponentsAsync(Guid pageId);
+        Task<bool> SlugExistsAsync(string slug, Guid? excludePageId = null);
+        Task<IEnumerable<Page>> SearchPagesAsync(string searchTerm, int page, int pageSize);
+        Task<Page?> GetWithVersionsAsync(Guid pageId);
     }
 
-    public class Repository<T> : IRepository<T> where T : BaseEntity
+    public class PageRepository : Repository<Page>, IPageRepository
     {
-        protected readonly ApplicationDbContext _context;
-        protected readonly DbSet<T> _dbSet;
-
-        public Repository(ApplicationDbContext context)
+        public PageRepository(ApplicationDbContext context) : base(context)
         {
-            _context = context;
-            _dbSet = context.Set<T>();
         }
 
-        public virtual async Task<T?> GetByIdAsync(Guid id)
+        public async Task<Page?> GetBySlugAsync(string slug)
         {
-            return await _dbSet.FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
+            return await _dbSet
+                .Include(p => p.Components.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.ChildComponents.Where(cc => !cc.IsDeleted))
+                .FirstOrDefaultAsync(p => p.Slug == slug && !p.IsDeleted);
         }
 
-        public virtual async Task<IEnumerable<T>> GetAllAsync()
+        public async Task<IEnumerable<Page>> GetPublishedPagesAsync()
         {
-            return await _dbSet.Where(e => !e.IsDeleted).ToListAsync();
+            return await _dbSet
+                .Where(p => p.Status == PageStatus.Published && !p.IsDeleted)
+                .OrderBy(p => p.Priority)
+                .ThenBy(p => p.Name)
+                .ToListAsync();
         }
 
-        public virtual async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate)
+        public async Task<IEnumerable<Page>> GetPageHierarchyAsync()
         {
-            return await _dbSet.Where(e => !e.IsDeleted).Where(predicate).ToListAsync();
+            return await _dbSet
+                .Include(p => p.ChildPages.Where(cp => !cp.IsDeleted))
+                .Where(p => p.ParentPageId == null && !p.IsDeleted)
+                .OrderBy(p => p.Priority)
+                .ThenBy(p => p.Name)
+                .ToListAsync();
         }
 
-        public virtual async Task<T?> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate)
+        public async Task<IEnumerable<Page>> GetChildPagesAsync(Guid parentPageId)
         {
-            return await _dbSet.Where(e => !e.IsDeleted).FirstOrDefaultAsync(predicate);
+            return await _dbSet
+                .Where(p => p.ParentPageId == parentPageId && !p.IsDeleted)
+                .OrderBy(p => p.Priority)
+                .ThenBy(p => p.Name)
+                .ToListAsync();
         }
 
-        public virtual async Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)
+        public async Task<Page?> GetWithComponentsAsync(Guid pageId)
         {
-            return await _dbSet.Where(e => !e.IsDeleted).AnyAsync(predicate);
+            return await _dbSet
+                .Include(p => p.Components.Where(c => !c.IsDeleted))
+                    .ThenInclude(c => c.ChildComponents.Where(cc => !cc.IsDeleted))
+                .FirstOrDefaultAsync(p => p.Id == pageId && !p.IsDeleted);
         }
 
-        public virtual async Task<int> CountAsync(Expression<Func<T, bool>>? predicate = null)
+        public async Task<bool> SlugExistsAsync(string slug, Guid? excludePageId = null)
         {
-            var query = _dbSet.Where(e => !e.IsDeleted);
-            if (predicate != null)
-                query = query.Where(predicate);
+            var query = _dbSet.Where(p => p.Slug == slug && !p.IsDeleted);
 
-            return await query.CountAsync();
+            if (excludePageId.HasValue)
+                query = query.Where(p => p.Id != excludePageId.Value);
+
+            return await query.AnyAsync();
         }
 
-        public virtual async Task<IEnumerable<T>> GetPagedAsync(int page, int pageSize, Expression<Func<T, bool>>? predicate = null)
+        public async Task<IEnumerable<Page>> SearchPagesAsync(string searchTerm, int page, int pageSize)
         {
-            var query = _dbSet.Where(e => !e.IsDeleted);
-            if (predicate != null)
-                query = query.Where(predicate);
-
-            return await query
+            return await _dbSet
+                .Where(p => !p.IsDeleted &&
+                           (p.Name.Contains(searchTerm) ||
+                            p.Title.Contains(searchTerm) ||
+                            p.Description!.Contains(searchTerm)))
+                .OrderBy(p => p.Name)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
         }
 
-        public virtual async Task<T> AddAsync(T entity)
+        public async Task<Page?> GetWithVersionsAsync(Guid pageId)
         {
-            await _dbSet.AddAsync(entity);
-            return entity;
-        }
-
-        public virtual async Task<IEnumerable<T>> AddRangeAsync(IEnumerable<T> entities)
-        {
-            await _dbSet.AddRangeAsync(entities);
-            return entities;
-        }
-
-        public virtual void Update(T entity)
-        {
-            _dbSet.Update(entity);
-        }
-
-        public virtual void Remove(T entity)
-        {
-            entity.IsDeleted = true;
-            entity.DeletedAt = DateTime.UtcNow;
-            Update(entity);
-        }
-
-        public virtual void RemoveRange(IEnumerable<T> entities)
-        {
-            foreach (var entity in entities)
-            {
-                Remove(entity);
-            }
-        }
-
-        public virtual async Task<int> SaveChangesAsync()
-        {
-            return await _context.SaveChangesAsync();
+            return await _context.Pages
+                .Include(p => p.Components.Where(c => !c.IsDeleted))
+                .FirstOrDefaultAsync(p => p.Id == pageId && !p.IsDeleted);
         }
     }
 }

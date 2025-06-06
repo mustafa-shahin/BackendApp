@@ -1,3 +1,4 @@
+// File: Backend.CMS.API/Program.cs
 using Backend.CMS.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -7,10 +8,10 @@ using Microsoft.OpenApi.Models;
 using Backend.CMS.Infrastructure.Repositories;
 using Backend.CMS.Application.Interfaces.Services;
 using Backend.CMS.Infrastructure.Services;
-using AutoMapper;
 using FluentValidation.AspNetCore;
 using FluentValidation;
 using Serilog;
+using Backend.CMS.Infrastructure.Mapping;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -69,14 +70,11 @@ builder.Services.AddCors(options =>
 });
 
 // Register AutoMapper
-builder.Services.AddAutoMapper(typeof(Program));
+builder.Services.AddAutoMapper(typeof(MappingProfile));
 
 // Register FluentValidation
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
-
-// Register MediatR
-builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<Program>());
 
 // Register repositories
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
