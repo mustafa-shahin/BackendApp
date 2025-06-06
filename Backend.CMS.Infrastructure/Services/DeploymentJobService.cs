@@ -64,7 +64,7 @@ namespace Backend.CMS.Infrastructure.Services
         public async Task<List<DeploymentProposal>> GetPendingDeploymentProposalsAsync()
         {
             var proposals = await _deploymentProposalRepository.FindAsync(p => p.Status == ProposalStatus.Pending);
-            return proposals.OrderBy(p => p.ProposedAt).ToList();
+            return [.. proposals.OrderBy(p => p.ProposedAt)];
         }
 
         public async Task<string> ApproveAndScheduleGlobalDeploymentAsync(Guid proposalId, string approvedBy, DateTime? scheduledTime = null)
