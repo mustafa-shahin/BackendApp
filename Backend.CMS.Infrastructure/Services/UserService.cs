@@ -20,19 +20,13 @@ namespace Backend.CMS.Infrastructure.Services
         public async Task<UserDto> GetUserByIdAsync(Guid userId)
         {
             var user = await _userRepository.GetWithRolesAsync(userId);
-            if (user == null)
-                throw new ArgumentException("User not found");
-
-            return _mapper.Map<UserDto>(user);
+            return user == null ? throw new ArgumentException("User not found") : _mapper.Map<UserDto>(user);
         }
 
         public async Task<UserDto> GetUserByEmailAsync(string email)
         {
             var user = await _userRepository.GetByEmailAsync(email);
-            if (user == null)
-                throw new ArgumentException("User not found");
-
-            return _mapper.Map<UserDto>(user);
+            return user == null ? throw new ArgumentException("User not found") : _mapper.Map<UserDto>(user);
         }
 
         public async Task<UserDto> GetUserByUsernameAsync(string username)
@@ -70,10 +64,7 @@ namespace Backend.CMS.Infrastructure.Services
 
         public async Task<UserDto> UpdateUserAsync(Guid userId, UpdateUserDto updateUserDto)
         {
-            var user = await _userRepository.GetByIdAsync(userId);
-            if (user == null)
-                throw new ArgumentException("User not found");
-
+            var user = await _userRepository.GetByIdAsync(userId) ?? throw new ArgumentException("User not found");
             if (await _userRepository.EmailExistsAsync(updateUserDto.Email, userId))
                 throw new ArgumentException("Email already exists");
 
@@ -208,10 +199,7 @@ namespace Backend.CMS.Infrastructure.Services
 
         public async Task<UserDto> UpdateUserPreferencesAsync(Guid userId, Dictionary<string, object> preferences)
         {
-            var user = await _userRepository.GetByIdAsync(userId);
-            if (user == null)
-                throw new ArgumentException("User not found");
-
+            var user = await _userRepository.GetByIdAsync(userId) ?? throw new ArgumentException("User not found");
             user.Preferences = preferences;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();

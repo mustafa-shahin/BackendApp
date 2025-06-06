@@ -1,5 +1,4 @@
-﻿// File: Backend.CMS.Infrastructure/Data/ApplicationDbContext.cs
-using Backend.CMS.Domain.Common;
+﻿using Backend.CMS.Domain.Common;
 using Backend.CMS.Domain.Common.Interfaces;
 using Backend.CMS.Domain.Entities;
 using Microsoft.AspNetCore.Http;
