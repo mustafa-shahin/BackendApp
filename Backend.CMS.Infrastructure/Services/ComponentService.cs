@@ -1,6 +1,7 @@
-﻿using AutoMapper;
+﻿// File: Backend.CMS.Infrastructure/Services/ComponentService.cs
+using AutoMapper;
 using Backend.CMS.Application.DTOs.Components;
-using Backend.CMS.Application.DTOs.Pages;
+using Backend.CMS.Application.Interfaces;
 using Backend.CMS.Application.Interfaces.Services;
 using Backend.CMS.Domain.Entities;
 using Backend.CMS.Domain.Enums;

@@ -1,4 +1,4 @@
-﻿
+﻿// File: Backend.CMS.Application/DTOs/Components/ComponentDto.cs
 using Backend.CMS.Domain.Enums;
 using System;
 using System.Collections.Generic;
@@ -79,5 +79,19 @@ namespace Backend.CMS.Application.DTOs.Components
         public int SortOrder { get; set; }
         public string? Tags { get; set; }
         public Dictionary<string, object> ConfigSchema { get; set; } = new();
+    }
+
+    public class ComponentTemplateListDto
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public ComponentType Type { get; set; }
+        public string? Icon { get; set; }
+        public string? Category { get; set; }
+        public bool IsSystemTemplate { get; set; }
+        public bool IsActive { get; set; }
+        public int SortOrder { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 }

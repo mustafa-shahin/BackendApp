@@ -1,6 +1,6 @@
-﻿using Backend.CMS.Application.DTOs.Companies;
+﻿// File: Backend.CMS.Infrastructure/Validation/DtoValidators.cs
+using Backend.CMS.Application.DTOs.Companies;
 using Backend.CMS.Application.DTOs.Components;
-using Backend.CMS.Application.DTOs.ComponentTemplates;
 using Backend.CMS.Application.DTOs.Pages;
 using Backend.CMS.Application.DTOs.Users;
 using FluentValidation;
@@ -64,6 +64,36 @@ namespace Backend.CMS.Infrastructure.Validation
     public class CreateUserDtoValidator : AbstractValidator<CreateUserDto>
     {
         public CreateUserDtoValidator()
+        {
+            RuleFor(x => x.Email)
+                .NotEmpty().WithMessage("Email is required")
+                .EmailAddress().WithMessage("Invalid email format")
+                .MaximumLength(256).WithMessage("Email cannot exceed 256 characters");
+
+            RuleFor(x => x.Username)
+                .NotEmpty().WithMessage("Username is required")
+                .MinimumLength(3).WithMessage("Username must be at least 3 characters")
+                .MaximumLength(256).WithMessage("Username cannot exceed 256 characters")
+                .Matches(@"^[a-zA-Z0-9_.-]+$").WithMessage("Username can only contain letters, numbers, underscores, hyphens, and periods");
+
+            RuleFor(x => x.Password)
+                .NotEmpty().WithMessage("Password is required")
+                .MinimumLength(8).WithMessage("Password must be at least 8 characters")
+                .Matches(@"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]").WithMessage("Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character");
+
+            RuleFor(x => x.FirstName)
+                .NotEmpty().WithMessage("First name is required")
+                .MaximumLength(100).WithMessage("First name cannot exceed 100 characters");
+
+            RuleFor(x => x.LastName)
+                .NotEmpty().WithMessage("Last name is required")
+                .MaximumLength(100).WithMessage("Last name cannot exceed 100 characters");
+        }
+    }
+
+    public class UpdateUserDtoValidator : AbstractValidator<UpdateUserDto>
+    {
+        public UpdateUserDtoValidator()
         {
             RuleFor(x => x.Email)
                 .NotEmpty().WithMessage("Email is required")
@@ -358,34 +388,3 @@ namespace Backend.CMS.Infrastructure.Validation
         }
     }
 }
-zA - Z0 - 9_.-]+$").WithMessage("Username can only contain letters, numbers, underscores, hyphens, and periods");
-
-            RuleFor(x => x.Password)
-                .NotEmpty().WithMessage("Password is required")
-                .MinimumLength(8).WithMessage("Password must be at least 8 characters")
-                .Matches(@"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]").WithMessage("Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character");
-
-RuleFor(x => x.FirstName)
-    .NotEmpty().WithMessage("First name is required")
-    .MaximumLength(100).WithMessage("First name cannot exceed 100 characters");
-
-RuleFor(x => x.LastName)
-    .NotEmpty().WithMessage("Last name is required")
-    .MaximumLength(100).WithMessage("Last name cannot exceed 100 characters");
-        }
-    }
-
-    public class UpdateUserDtoValidator : AbstractValidator<UpdateUserDto>
-{
-    public UpdateUserDtoValidator()
-    {
-        RuleFor(x => x.Email)
-            .NotEmpty().WithMessage("Email is required")
-            .EmailAddress().WithMessage("Invalid email format")
-            .MaximumLength(256).WithMessage("Email cannot exceed 256 characters");
-
-        RuleFor(x => x.Username)
-            .NotEmpty().WithMessage("Username is required")
-            .MinimumLength(3).WithMessage("Username must be at least 3 characters")
-            .MaximumLength(256).WithMessage("Username cannot exceed 256 characters")
-            .Matches(@"^[a-

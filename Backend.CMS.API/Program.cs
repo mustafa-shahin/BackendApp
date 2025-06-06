@@ -1,17 +1,19 @@
-// File: Backend.CMS.API/Program.cs
-using Backend.CMS.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
-using Microsoft.OpenApi.Models;
-using Backend.CMS.Infrastructure.Repositories;
+
+using Backend.CMS.Application.Interfaces;
 using Backend.CMS.Application.Interfaces.Services;
-using Backend.CMS.Infrastructure.Services;
-using FluentValidation.AspNetCore;
-using FluentValidation;
-using Serilog;
+using Backend.CMS.Infrastructure.Data;
 using Backend.CMS.Infrastructure.Mapping;
+using Backend.CMS.Infrastructure.Repositories;
+using Backend.CMS.Infrastructure.Services;
+using FluentValidation;
+using MediatR;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using Serilog;
+using System.Reflection;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -72,9 +74,10 @@ builder.Services.AddCors(options =>
 // Register AutoMapper
 builder.Services.AddAutoMapper(typeof(MappingProfile));
 
-// Register FluentValidation
-builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+// Register MediatR (Updated approach)
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly()));
 
 // Register repositories
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));

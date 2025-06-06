@@ -1,11 +1,7 @@
-﻿using Backend.CMS.Application.DTOs.Components;
-using Backend.CMS.Application.DTOs.ComponentTemplates;
+﻿
+using Backend.CMS.Application.DTOs.Components;
 using Backend.CMS.Domain.Enums;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-
-namespace Backend.CMS.Application.Interfaces.Services
+namespace Backend.CMS.Application.Interfaces
 {
     public interface IComponentService
     {

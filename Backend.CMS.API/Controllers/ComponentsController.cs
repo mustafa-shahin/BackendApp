@@ -1,5 +1,5 @@
 using Backend.CMS.Application.DTOs.Components;
-using Backend.CMS.Application.Interfaces.Services;
+using Backend.CMS.Application.Interfaces;
 using Backend.CMS.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

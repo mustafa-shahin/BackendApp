@@ -1,7 +1,7 @@
-﻿using AutoMapper;
+﻿// File: Backend.CMS.Infrastructure/Mapping/MappingProfile.cs
+using AutoMapper;
 using Backend.CMS.Application.DTOs.Companies;
 using Backend.CMS.Application.DTOs.Components;
-using Backend.CMS.Application.DTOs.ComponentTemplates;
 using Backend.CMS.Application.DTOs.Pages;
 using Backend.CMS.Application.DTOs.Users;
 using Backend.CMS.Application.Interfaces.Services;
@@ -106,12 +106,12 @@ namespace Backend.CMS.Infrastructure.Mapping
                 .ForMember(dest => dest.OpeningHours, opt => opt.Ignore());
 
             // LocationOpeningHour mappings
-            CreateMap<LocationOpeningHour, OpeningHourDto>();
-            CreateMap<CreateOpeningHourDto, LocationOpeningHour>()
+            CreateMap<LocationOpeningHour, LocationOpeningHourDto>();
+            CreateMap<CreateLocationOpeningHourDto, LocationOpeningHour>()
                 .ForMember(dest => dest.Location, opt => opt.Ignore())
                 .ForMember(dest => dest.LocationId, opt => opt.Ignore());
 
-            // ComponentTemplate mappings
+            // ComponentTemplate mappings (Using Components namespace to avoid ambiguity)
             CreateMap<ComponentTemplate, ComponentTemplateDto>();
 
             CreateMap<CreateComponentTemplateDto, ComponentTemplate>()
