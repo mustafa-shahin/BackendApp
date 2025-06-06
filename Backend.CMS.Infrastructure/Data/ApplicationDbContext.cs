@@ -1,4 +1,5 @@
-﻿using Backend.CMS.Domain.Common;
+﻿// File: Backend.CMS.Infrastructure/Data/ApplicationDbContext.cs
+using Backend.CMS.Domain.Common;
 using Backend.CMS.Domain.Common.Interfaces;
 using Backend.CMS.Domain.Entities;
 using Microsoft.AspNetCore.Http;
@@ -171,7 +172,7 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.HasKey(e => new { e.PageId, e.RoleId });
             });
 
-            // PageVersion configuration
+            // PageVersion configuration - FIXED
             modelBuilder.Entity<PageVersion>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -181,9 +182,11 @@ namespace Backend.CMS.Infrastructure.Data
                     .WithMany()
                     .HasForeignKey(e => e.PageId);
 
+                // Fix: Use CreatedByUserId instead of CreatedBy for the foreign key
                 entity.HasOne(e => e.CreatedByUser)
                     .WithMany()
-                    .HasForeignKey(e => e.CreatedBy);
+                    .HasForeignKey(e => e.CreatedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             // Company configuration

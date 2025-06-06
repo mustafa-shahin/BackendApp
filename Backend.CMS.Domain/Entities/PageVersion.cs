@@ -9,6 +9,8 @@ namespace Backend.CMS.Domain.Entities
         public int VersionNumber { get; set; }
         public string Data { get; set; } = string.Empty; // JSON snapshot
         public string? ChangeNotes { get; set; }
+
+        public Guid CreatedByUserId { get; set; }
         public User CreatedByUser { get; set; } = null!;
     }
 }
