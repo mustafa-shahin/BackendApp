@@ -253,7 +253,7 @@ app.MapPost("/admin/jobs/check-template-updates", async (ITemplateSyncJobService
 {
     var detection = await templateSyncService.DetectTemplateUpdatesAsync();
     return Results.Ok(detection);
-}).RequireAuthorization("Administrator");
+}).RequireAuthorization();
 
 app.MapPost("/admin/jobs/emergency-stop-all", async (IServiceProvider serviceProvider) =>
 {
@@ -263,7 +263,7 @@ app.MapPost("/admin/jobs/emergency-stop-all", async (IServiceProvider servicePro
 
     // This would require additional implementation to stop running jobs
     return Results.Ok("Emergency stop initiated - check Hangfire dashboard");
-}).RequireAuthorization("Administrator");
+}).RequireAuthorization();
 
 // Initialize Hangfire database
 try

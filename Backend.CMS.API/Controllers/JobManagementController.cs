@@ -1,11 +1,10 @@
 using Backend.CMS.Application.Interfaces.Services;
+using Backend.CMS.Domain.Entities;
+using Backend.CMS.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using Backend.CMS.Domain.Entities;
 using Microsoft.Extensions.Logging;
+using System.Security.Claims;
 
 namespace Backend.CMS.API.Controllers
 {
@@ -35,7 +34,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var proposedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var proposedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(proposedBy.Trim()))
+                    proposedBy = "Unknown Admin";
+
                 var proposalId = await _deploymentJobService.CreateDeploymentProposalAsync(
                     request.Version,
                     request.ReleaseNotes,
@@ -72,7 +74,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var approvedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var approvedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(approvedBy.Trim()))
+                    approvedBy = "Unknown Admin";
+
                 var jobId = await _deploymentJobService.ApproveAndScheduleGlobalDeploymentAsync(
                     proposalId,
                     approvedBy,
@@ -94,7 +99,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var rejectedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var rejectedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(rejectedBy.Trim()))
+                    rejectedBy = "Unknown Admin";
+
                 await _deploymentJobService.RejectDeploymentProposalAsync(
                     proposalId,
                     rejectedBy,
@@ -116,7 +124,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var scheduledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var scheduledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(scheduledBy.Trim()))
+                    scheduledBy = "Unknown Admin";
+
                 var jobId = await _deploymentJobService.ScheduleTenantDeploymentAsync(
                     tenantId,
                     request.Version,
@@ -141,7 +152,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var scheduledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var scheduledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(scheduledBy.Trim()))
+                    scheduledBy = "Unknown Admin";
+
                 var jobId = await _deploymentJobService.ScheduleTenantRollbackAsync(
                     tenantId,
                     request.TargetVersionId,
@@ -162,7 +176,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var cancelledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var cancelledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(cancelledBy.Trim()))
+                    cancelledBy = "Unknown Admin";
+
                 await _deploymentJobService.CancelScheduledDeploymentAsync(jobId, cancelledBy);
                 return Ok(new { Message = "Deployment cancelled" });
             }
@@ -240,7 +257,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var approvedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var approvedBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(approvedBy.Trim()))
+                    approvedBy = "Unknown Admin";
+
                 var jobId = await _templateSyncJobService.ApproveAndScheduleGlobalTemplateSyncAsync(
                     request.MasterTemplateVersion,
                     approvedBy,
@@ -262,7 +282,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var scheduledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var scheduledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(scheduledBy.Trim()))
+                    scheduledBy = "Unknown Admin";
+
                 var jobId = await _templateSyncJobService.ScheduleTenantTemplateSyncAsync(
                     tenantId,
                     request.MasterTemplateVersion,
@@ -313,7 +336,10 @@ namespace Backend.CMS.API.Controllers
         {
             try
             {
-                var cancelledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}" ?? "Unknown Admin";
+                var cancelledBy = $"{User.FindFirst("firstName")?.Value} {User.FindFirst("lastName")?.Value}".Trim();
+                if (string.IsNullOrEmpty(cancelledBy.Trim()))
+                    cancelledBy = "Unknown Admin";
+
                 await _templateSyncJobService.CancelScheduledSyncAsync(jobId, cancelledBy);
                 return Ok(new { Message = "Sync cancelled" });
             }

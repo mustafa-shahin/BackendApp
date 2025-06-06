@@ -1,16 +1,4 @@
 ﻿using Backend.CMS.Domain.Common;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Backend.CMS.Domain.Entities
-{
-    internal class DeploymentProposal
-    {
-    }
-}using Backend.CMS.Domain.Common;
 using Backend.CMS.Domain.Enums;
 
 namespace Backend.CMS.Domain.Entities

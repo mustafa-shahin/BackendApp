@@ -135,22 +135,6 @@ namespace Backend.CMS.Application.Interfaces.Services
         public DateTime? CompletedAt { get; set; }
     }
 
-    public class DeploymentProposal
-    {
-        public Guid Id { get; set; }
-        public string Version { get; set; } = string.Empty;
-        public string ReleaseNotes { get; set; } = string.Empty;
-        public Dictionary<string, object> MigrationData { get; set; } = new();
-        public string ProposedBy { get; set; } = string.Empty;
-        public DateTime ProposedAt { get; set; }
-        public string Status { get; set; } = string.Empty; // Pending, Approved, Rejected
-        public string? ReviewedBy { get; set; }
-        public DateTime? ReviewedAt { get; set; }
-        public string? ReviewNotes { get; set; }
-        public List<string> AffectedTenants { get; set; } = new();
-        public Dictionary<string, object> ImpactAnalysis { get; set; } = new();
-    }
-
     public class TemplateUpdateDetection
     {
         public string LatestVersion { get; set; } = string.Empty;
