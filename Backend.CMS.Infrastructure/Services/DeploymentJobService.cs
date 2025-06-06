@@ -6,6 +6,7 @@ using Backend.CMS.Infrastructure.Repositories;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Backend.CMS.Infrastructure.Services
@@ -19,6 +20,7 @@ namespace Backend.CMS.Infrastructure.Services
         private readonly IConfiguration _configuration;
         private readonly ILogger<DeploymentJobService> _logger;
         private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly IServiceProvider _serviceProvider;
 
         public DeploymentJobService(
             IRepository<DeploymentJob> deploymentJobRepository,
@@ -27,7 +29,8 @@ namespace Backend.CMS.Infrastructure.Services
             IVersioningService versioningService,
             IConfiguration configuration,
             ILogger<DeploymentJobService> logger,
-            IBackgroundJobClient backgroundJobClient)
+            IBackgroundJobClient backgroundJobClient,
+            IServiceProvider serviceProvider)
         {
             _deploymentJobRepository = deploymentJobRepository;
             _deploymentProposalRepository = deploymentProposalRepository;
@@ -36,6 +39,7 @@ namespace Backend.CMS.Infrastructure.Services
             _configuration = configuration;
             _logger = logger;
             _backgroundJobClient = backgroundJobClient;
+            _serviceProvider = serviceProvider;
         }
 
         public async Task<string> CreateDeploymentProposalAsync(string version, string releaseNotes, Dictionary<string, object> migrationData, string proposedBy)
@@ -170,10 +174,12 @@ namespace Backend.CMS.Infrastructure.Services
                 optionsBuilder.UseNpgsql(connectionString);
 
                 using var tenantContext = new ApplicationDbContext(optionsBuilder.Options, new DebugTenantProvider(tenantId));
+
+                // Create VersioningService with proper dependencies
                 var tenantVersioningService = new VersioningService(
                     new Repository<DeploymentVersion>(tenantContext),
                     tenantContext,
-                    _logger);
+                    _serviceProvider.GetRequiredService<ILogger<VersioningService>>());
 
                 // Create and deploy version
                 var deploymentVersion = await tenantVersioningService.CreateDeploymentVersionAsync(version, releaseNotes, migrationData);
@@ -246,10 +252,11 @@ namespace Backend.CMS.Infrastructure.Services
                 optionsBuilder.UseNpgsql(connectionString);
 
                 using var tenantContext = new ApplicationDbContext(optionsBuilder.Options, new DebugTenantProvider(tenantId));
+
                 var tenantVersioningService = new VersioningService(
                     new Repository<DeploymentVersion>(tenantContext),
                     tenantContext,
-                    _logger);
+                    _serviceProvider.GetRequiredService<ILogger<VersioningService>>());
 
                 var success = await tenantVersioningService.RollbackToVersionAsync(targetVersionId, rolledBackBy);
 

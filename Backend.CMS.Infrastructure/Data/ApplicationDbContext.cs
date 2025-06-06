@@ -38,9 +38,14 @@ namespace Backend.CMS.Infrastructure.Data
         public DbSet<ComponentTemplate> ComponentTemplates { get; set; }
         public DbSet<DeploymentVersion> DeploymentVersions { get; set; }
         public DbSet<TemplateSyncLog> TemplateSyncLogs { get; set; }
+
+        // Added missing DbSets
         public DbSet<DeploymentJob> DeploymentJobs { get; set; }
         public DbSet<TemplateSyncJob> TemplateSyncJobs { get; set; }
         public DbSet<TenantRegistry> TenantRegistry { get; set; }
+        public DbSet<DeploymentProposal> DeploymentProposals { get; set; }
+        public DbSet<TemplateUpdateProposal> TemplateUpdateProposals { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -311,6 +316,39 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.ConflictResolutions).HasConversion(dictionaryConverter);
                 entity.Property(e => e.SyncMetadata).HasConversion(dictionaryConverter);
             });
+
+            // DeploymentJob configuration
+            modelBuilder.Entity<DeploymentJob>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.JobId).IsUnique();
+                entity.Property(e => e.JobId).HasMaxLength(100);
+                entity.Property(e => e.TenantId).HasMaxLength(100);
+                entity.Property(e => e.Version).HasMaxLength(50);
+                entity.Property(e => e.ScheduledBy).HasMaxLength(256);
+                entity.Property(e => e.ExecutedBy).HasMaxLength(256);
+                entity.Property(e => e.MigrationData).HasConversion(dictionaryConverter);
+                entity.Property(e => e.JobMetadata).HasConversion(dictionaryConverter);
+                entity.Property(e => e.FailedTenants).HasConversion(listConverter);
+            });
+
+            // TemplateSyncJob configuration
+            modelBuilder.Entity<TemplateSyncJob>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.JobId).IsUnique();
+                entity.Property(e => e.JobId).HasMaxLength(100);
+                entity.Property(e => e.TenantId).HasMaxLength(100);
+                entity.Property(e => e.MasterTemplateVersion).HasMaxLength(50);
+                entity.Property(e => e.PreviousVersion).HasMaxLength(50);
+                entity.Property(e => e.ScheduledBy).HasMaxLength(256);
+                entity.Property(e => e.ExecutedBy).HasMaxLength(256);
+                entity.Property(e => e.JobMetadata).HasConversion(dictionaryConverter);
+                entity.Property(e => e.FailedTenants).HasConversion(listConverter);
+                entity.Property(e => e.ConflictResolutions).HasConversion(dictionaryConverter);
+            });
+
+            // TenantRegistry configuration
             modelBuilder.Entity<TenantRegistry>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -321,6 +359,37 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.CurrentTemplateVersion).HasMaxLength(50);
                 entity.Property(e => e.MaintenanceWindow).HasMaxLength(100);
                 entity.Property(e => e.TenantMetadata).HasConversion(dictionaryConverter);
+            });
+
+            // DeploymentProposal configuration
+            modelBuilder.Entity<DeploymentProposal>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Version).HasMaxLength(50);
+                entity.Property(e => e.ProposedBy).HasMaxLength(256);
+                entity.Property(e => e.ReviewedBy).HasMaxLength(256);
+                entity.Property(e => e.MigrationData).HasConversion(dictionaryConverter);
+                entity.Property(e => e.ImpactAnalysis).HasConversion(dictionaryConverter);
+                entity.Property(e => e.RollbackPlan).HasConversion(dictionaryConverter);
+                entity.Property(e => e.AffectedTenants).HasConversion(listConverter);
+                entity.Property(e => e.PrerequisiteChecks).HasConversion(listConverter);
+            });
+
+            // TemplateUpdateProposal configuration
+            modelBuilder.Entity<TemplateUpdateProposal>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.MasterTemplateVersion).HasMaxLength(50);
+                entity.Property(e => e.PreviousVersion).HasMaxLength(50);
+                entity.Property(e => e.DetectedBy).HasMaxLength(256);
+                entity.Property(e => e.ReviewedBy).HasMaxLength(256);
+                entity.Property(e => e.ChangedFiles).HasConversion(listConverter);
+                entity.Property(e => e.AddedFiles).HasConversion(listConverter);
+                entity.Property(e => e.DeletedFiles).HasConversion(listConverter);
+                entity.Property(e => e.BreakingChanges).HasConversion(listConverter);
+                entity.Property(e => e.ConflictAnalysis).HasConversion(dictionaryConverter);
+                entity.Property(e => e.AffectedTenants).HasConversion(listConverter);
+                entity.Property(e => e.ImpactAnalysis).HasConversion(dictionaryConverter);
             });
 
             // Global query filters for tenant isolation
