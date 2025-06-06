@@ -27,6 +27,7 @@ namespace Backend.CMS.Infrastructure.Data
         public DbSet<UserRole> UserRoles { get; set; }
         public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<UserSession> UserSessions { get; set; }
+        public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
         public DbSet<Page> Pages { get; set; }
         public DbSet<PageComponent> PageComponents { get; set; }
         public DbSet<PagePermission> PagePermissions { get; set; }
@@ -35,7 +36,11 @@ namespace Backend.CMS.Infrastructure.Data
         public DbSet<Location> Locations { get; set; }
         public DbSet<LocationOpeningHour> LocationOpeningHours { get; set; }
         public DbSet<ComponentTemplate> ComponentTemplates { get; set; }
-
+        public DbSet<DeploymentVersion> DeploymentVersions { get; set; }
+        public DbSet<TemplateSyncLog> TemplateSyncLogs { get; set; }
+        public DbSet<DeploymentJob> DeploymentJobs { get; set; }
+        public DbSet<TemplateSyncJob> TemplateSyncJobs { get; set; }
+        public DbSet<TenantRegistry> TenantRegistry { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -59,6 +64,18 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.Username).HasMaxLength(256);
                 entity.Property(e => e.FirstName).HasMaxLength(100);
                 entity.Property(e => e.LastName).HasMaxLength(100);
+                entity.Property(e => e.Phone).HasMaxLength(50);
+                entity.Property(e => e.BillingAddress).HasMaxLength(500);
+                entity.Property(e => e.BillingCity).HasMaxLength(100);
+                entity.Property(e => e.BillingState).HasMaxLength(100);
+                entity.Property(e => e.BillingCountry).HasMaxLength(100);
+                entity.Property(e => e.BillingPostalCode).HasMaxLength(20);
+                entity.Property(e => e.ShippingAddress).HasMaxLength(500);
+                entity.Property(e => e.ShippingCity).HasMaxLength(100);
+                entity.Property(e => e.ShippingState).HasMaxLength(100);
+                entity.Property(e => e.ShippingCountry).HasMaxLength(100);
+                entity.Property(e => e.ShippingPostalCode).HasMaxLength(20);
+                entity.Property(e => e.Gender).HasMaxLength(20);
                 entity.Property(e => e.Preferences).HasConversion(dictionaryConverter);
                 entity.Property(e => e.RecoveryCodes).HasConversion(listConverter);
 
@@ -69,6 +86,20 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.HasMany(e => e.Sessions)
                     .WithOne(e => e.User)
                     .HasForeignKey(e => e.UserId);
+
+                entity.HasMany(e => e.PasswordResetTokens)
+                    .WithOne(e => e.User)
+                    .HasForeignKey(e => e.UserId);
+            });
+
+            // PasswordResetToken configuration
+            modelBuilder.Entity<PasswordResetToken>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.Token).IsUnique();
+                entity.Property(e => e.Token).HasMaxLength(500);
+                entity.Property(e => e.IpAddress).HasMaxLength(45);
+                entity.Property(e => e.UserAgent).HasMaxLength(500);
             });
 
             // Role configuration
@@ -171,7 +202,7 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.HasKey(e => new { e.PageId, e.RoleId });
             });
 
-            // PageVersion configuration - FIXED
+            // PageVersion configuration
             modelBuilder.Entity<PageVersion>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -181,7 +212,6 @@ namespace Backend.CMS.Infrastructure.Data
                     .WithMany()
                     .HasForeignKey(e => e.PageId);
 
-                // Fix: Use CreatedByUserId instead of CreatedBy for the foreign key
                 entity.HasOne(e => e.CreatedByUser)
                     .WithMany()
                     .HasForeignKey(e => e.CreatedByUserId)
@@ -251,6 +281,48 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.ConfigSchema).HasConversion(dictionaryConverter);
             });
 
+            // DeploymentVersion configuration
+            modelBuilder.Entity<DeploymentVersion>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.TenantId, e.Version });
+                entity.Property(e => e.Version).HasMaxLength(50);
+                entity.Property(e => e.DeployedBy).HasMaxLength(256);
+                entity.Property(e => e.MigrationData).HasConversion(dictionaryConverter);
+                entity.Property(e => e.DeploymentMetadata).HasConversion(dictionaryConverter);
+
+                entity.HasOne(e => e.RollbackFromVersion)
+                    .WithMany()
+                    .HasForeignKey(e => e.RollbackFromVersionId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // TemplateSyncLog configuration
+            modelBuilder.Entity<TemplateSyncLog>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.TenantId, e.MasterTemplateVersion });
+                entity.Property(e => e.MasterTemplateVersion).HasMaxLength(50);
+                entity.Property(e => e.PreviousVersion).HasMaxLength(50);
+                entity.Property(e => e.SyncedBy).HasMaxLength(256);
+                entity.Property(e => e.FilesUpdated).HasConversion(listConverter);
+                entity.Property(e => e.FilesAdded).HasConversion(listConverter);
+                entity.Property(e => e.FilesDeleted).HasConversion(listConverter);
+                entity.Property(e => e.ConflictResolutions).HasConversion(dictionaryConverter);
+                entity.Property(e => e.SyncMetadata).HasConversion(dictionaryConverter);
+            });
+            modelBuilder.Entity<TenantRegistry>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.TenantId).IsUnique();
+                entity.Property(e => e.TenantId).HasMaxLength(100);
+                entity.Property(e => e.TenantName).HasMaxLength(200);
+                entity.Property(e => e.CurrentVersion).HasMaxLength(50);
+                entity.Property(e => e.CurrentTemplateVersion).HasMaxLength(50);
+                entity.Property(e => e.MaintenanceWindow).HasMaxLength(100);
+                entity.Property(e => e.TenantMetadata).HasConversion(dictionaryConverter);
+            });
+
             // Global query filters for tenant isolation
             modelBuilder.Entity<User>().HasQueryFilter(e => e.TenantId == _tenantId);
             modelBuilder.Entity<Role>().HasQueryFilter(e => e.TenantId == _tenantId);
@@ -258,6 +330,8 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<Company>().HasQueryFilter(e => e.TenantId == _tenantId);
             modelBuilder.Entity<Location>().HasQueryFilter(e => e.TenantId == _tenantId);
             modelBuilder.Entity<ComponentTemplate>().HasQueryFilter(e => e.TenantId == _tenantId);
+            modelBuilder.Entity<DeploymentVersion>().HasQueryFilter(e => e.TenantId == _tenantId);
+            modelBuilder.Entity<TemplateSyncLog>().HasQueryFilter(e => e.TenantId == _tenantId);
         }
 
         public override int SaveChanges()

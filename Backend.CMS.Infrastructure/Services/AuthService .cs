@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using Backend.CMS.Application.DTOs.Users;
+using Backend.CMS.Application.Interfaces;
 using Backend.CMS.Application.Interfaces.Services;
 using Backend.CMS.Domain.Entities;
 using Backend.CMS.Infrastructure.Repositories;
@@ -7,6 +8,7 @@ using BCrypt.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using OtpNet;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -18,22 +20,28 @@ namespace Backend.CMS.Infrastructure.Services
     {
         private readonly IUserRepository _userRepository;
         private readonly IRepository<UserSession> _sessionRepository;
+        private readonly IRepository<PasswordResetToken> _passwordResetRepository;
         private readonly IConfiguration _configuration;
         private readonly IMapper _mapper;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IEmailService _emailService;
 
         public AuthService(
             IUserRepository userRepository,
             IRepository<UserSession> sessionRepository,
+            IRepository<PasswordResetToken> passwordResetRepository,
             IConfiguration configuration,
             IMapper mapper,
-            IHttpContextAccessor httpContextAccessor)
+            IHttpContextAccessor httpContextAccessor,
+            IEmailService emailService)
         {
             _userRepository = userRepository;
             _sessionRepository = sessionRepository;
+            _passwordResetRepository = passwordResetRepository;
             _configuration = configuration;
             _mapper = mapper;
             _httpContextAccessor = httpContextAccessor;
+            _emailService = emailService;
         }
 
         public async Task<LoginResponseDto> LoginAsync(LoginDto loginDto)
@@ -42,6 +50,20 @@ namespace Backend.CMS.Infrastructure.Services
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
             {
+                // Increment failed attempts for existing user
+                if (user != null)
+                {
+                    user.FailedLoginAttempts++;
+                    if (user.FailedLoginAttempts >= 5)
+                    {
+                        user.IsLocked = true;
+                        user.LockoutEnd = DateTime.UtcNow.AddMinutes(30);
+                        await _emailService.SendAccountLockedEmailAsync(user.Email, user.FirstName);
+                    }
+                    _userRepository.Update(user);
+                    await _userRepository.SaveChangesAsync();
+                }
+
                 throw new UnauthorizedAccessException("Invalid email or password");
             }
 
@@ -54,7 +76,8 @@ namespace Backend.CMS.Infrastructure.Services
             {
                 if (user.LockoutEnd.HasValue && user.LockoutEnd > DateTime.UtcNow)
                 {
-                    throw new UnauthorizedAccessException("Account is locked");
+                    var remainingTime = user.LockoutEnd.Value - DateTime.UtcNow;
+                    throw new UnauthorizedAccessException($"Account is locked for {remainingTime.Minutes} more minutes");
                 }
 
                 // Unlock if lockout period has expired
@@ -79,7 +102,12 @@ namespace Backend.CMS.Infrastructure.Services
                 var isValidCode = await Verify2FACodeAsync(user.Id, loginDto.TwoFactorCode);
                 if (!isValidCode)
                 {
-                    throw new UnauthorizedAccessException("Invalid two-factor authentication code");
+                    // Check if it's a recovery code
+                    var isRecoveryCode = await UseRecoveryCodeAsync(user.Id, loginDto.TwoFactorCode);
+                    if (!isRecoveryCode)
+                    {
+                        throw new UnauthorizedAccessException("Invalid two-factor authentication code");
+                    }
                 }
             }
 
@@ -229,18 +257,76 @@ namespace Backend.CMS.Infrastructure.Services
                 return true; // Don't reveal if email exists
             }
 
-            // Generate reset token (implement email sending logic)
+            // Invalidate any existing password reset tokens for this user
+            var existingTokens = await _passwordResetRepository.FindAsync(t => t.UserId == user.Id && !t.IsUsed);
+            foreach (var existingToken in existingTokens)
+            {
+                existingToken.IsUsed = true;
+                existingToken.UsedAt = DateTime.UtcNow;
+                _passwordResetRepository.Update(existingToken);
+            }
+
+            // Generate new reset token
             var resetToken = GenerateSecureToken();
-            // Store reset token and send email
-            // Implementation depends on your email service
+            var passwordResetToken = new PasswordResetToken
+            {
+                UserId = user.Id,
+                Token = resetToken,
+                ExpiresAt = DateTime.UtcNow.AddHours(24),
+                IsUsed = false,
+                IpAddress = GetClientIpAddress(),
+                UserAgent = GetUserAgent()
+            };
+
+            await _passwordResetRepository.AddAsync(passwordResetToken);
+            await _passwordResetRepository.SaveChangesAsync();
+
+            // Send password reset email
+            var resetUrl = _configuration["AppSettings:FrontendUrl"] + "/reset-password";
+            await _emailService.SendPasswordResetEmailAsync(user.Email, resetToken, resetUrl);
 
             return true;
         }
 
         public async Task<bool> ResetPasswordAsync(string token, string newPassword)
         {
-            // Validate reset token and update password
-            // Implementation depends on how you store reset tokens
+            var passwordResetToken = await _passwordResetRepository.FirstOrDefaultAsync(t =>
+                t.Token == token &&
+                !t.IsUsed &&
+                t.ExpiresAt > DateTime.UtcNow);
+
+            if (passwordResetToken == null)
+            {
+                return false;
+            }
+
+            var user = await _userRepository.GetByIdAsync(passwordResetToken.UserId);
+            if (user == null)
+            {
+                return false;
+            }
+
+            // Update password
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
+            user.PasswordChangedAt = DateTime.UtcNow;
+            user.FailedLoginAttempts = 0;
+            user.IsLocked = false;
+            user.LockoutEnd = null;
+
+            // Mark token as used
+            passwordResetToken.IsUsed = true;
+            passwordResetToken.UsedAt = DateTime.UtcNow;
+
+            _userRepository.Update(user);
+            _passwordResetRepository.Update(passwordResetToken);
+            await _passwordResetRepository.SaveChangesAsync();
+
+            // Revoke all existing sessions
+            await RevokeAllSessionsAsync(user.Id);
+
+            // Send confirmation email
+            await _emailService.SendPasswordChangedEmailAsync(user.Email, user.FirstName);
+
             return true;
         }
 
@@ -252,6 +338,10 @@ namespace Backend.CMS.Infrastructure.Services
             user.TwoFactorEnabled = true;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
+
+            // Send confirmation email
+            await _emailService.Send2FAEnabledEmailAsync(user.Email, user.FirstName);
+
             return true;
         }
 
@@ -262,6 +352,7 @@ namespace Backend.CMS.Infrastructure.Services
 
             user.TwoFactorEnabled = false;
             user.TwoFactorSecret = null;
+            user.RecoveryCodes.Clear();
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
             return true;
@@ -272,7 +363,7 @@ namespace Backend.CMS.Infrastructure.Services
             var user = await _userRepository.GetByIdAsync(userId);
             if (user == null) throw new ArgumentException("User not found");
 
-            var secret = GenerateSecureToken();
+            var secret = Base32Encoding.ToString(KeyGeneration.GenerateRandomKey(20));
             user.TwoFactorSecret = secret;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
@@ -286,9 +377,31 @@ namespace Backend.CMS.Infrastructure.Services
             if (user == null || string.IsNullOrEmpty(user.TwoFactorSecret))
                 return false;
 
-            // Implement TOTP verification logic
-            // This is a simplified version - you'd use a proper TOTP library
-            return true;
+            try
+            {
+                var secretBytes = Base32Encoding.ToBytes(user.TwoFactorSecret);
+                var totp = new Totp(secretBytes);
+
+                // Verify current window and one window before/after for clock drift
+                var currentTime = DateTime.UtcNow;
+                var verificationWindow = TimeSpan.FromSeconds(30);
+
+                for (int i = -1; i <= 1; i++)
+                {
+                    var timeToCheck = currentTime.AddSeconds(i * 30);
+                    var expectedCode = totp.ComputeTotp(timeToCheck);
+                    if (expectedCode == code)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public async Task<List<string>> GenerateRecoveryCodesAsync(Guid userId)
@@ -334,8 +447,18 @@ namespace Backend.CMS.Infrastructure.Services
                 new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new("userId", user.Id.ToString()),
                 new("firstName", user.FirstName),
-                new("lastName", user.LastName)
+                new("lastName", user.LastName),
+                new("tenantId", user.TenantId)
             };
+
+            // Add role claims
+            if (user.UserRoles?.Any() == true)
+            {
+                foreach (var userRole in user.UserRoles.Where(ur => ur.IsActive))
+                {
+                    claims.Add(new Claim(ClaimTypes.Role, userRole.Role.Name));
+                }
+            }
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
@@ -369,7 +492,7 @@ namespace Backend.CMS.Infrastructure.Services
         private string GenerateRecoveryCode()
         {
             var random = new Random();
-            return random.Next(100000, 999999).ToString();
+            return $"{random.Next(1000, 9999)}-{random.Next(1000, 9999)}";
         }
 
         private Guid GetCurrentUserId()
@@ -387,7 +510,16 @@ namespace Backend.CMS.Infrastructure.Services
 
         private string GetClientIpAddress()
         {
-            return _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+            var ipAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+
+            // Check for forwarded IP (load balancer, proxy)
+            var forwardedFor = _httpContextAccessor.HttpContext?.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(forwardedFor))
+            {
+                ipAddress = forwardedFor.Split(',').FirstOrDefault()?.Trim();
+            }
+
+            return ipAddress ?? "Unknown";
         }
 
         private string GetUserAgent()

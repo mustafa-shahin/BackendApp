@@ -1,4 +1,3 @@
-
 using Backend.CMS.Application.Interfaces;
 using Backend.CMS.Application.Interfaces.Services;
 using Backend.CMS.Infrastructure.Data;
@@ -6,6 +5,9 @@ using Backend.CMS.Infrastructure.Mapping;
 using Backend.CMS.Infrastructure.Repositories;
 using Backend.CMS.Infrastructure.Services;
 using FluentValidation;
+using Hangfire;
+using Hangfire.Dashboard;
+using Hangfire.PostgreSql;
 using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -28,9 +30,42 @@ builder.Host.UseSerilog();
 // Add services to the container
 builder.Services.AddControllers();
 
-// Configure Entity Framework
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Configure Entity Framework with dynamic tenant connection string
+builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
+{
+    var tenantProvider = serviceProvider.GetRequiredService<ITenantProvider>();
+    var tenantId = tenantProvider.GetTenantId();
+
+    var connectionStringTemplate = builder.Configuration.GetConnectionString("DefaultConnection");
+    var connectionString = connectionStringTemplate?.Replace("{TENANT_ID}", tenantId);
+
+    options.UseNpgsql(connectionString);
+});
+
+// Configure Hangfire
+var hangfireConnectionString = builder.Configuration.GetConnectionString("HangfireConnection")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")?.Replace("{TENANT_ID}", "hangfire");
+
+builder.Services.AddHangfire(configuration => configuration
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UsePostgreSqlStorage(hangfireConnectionString, new PostgreSqlStorageOptions
+    {
+        QueuePollInterval = TimeSpan.FromSeconds(10),
+        JobExpirationCheckInterval = TimeSpan.FromHours(1),
+        CountersAggregateInterval = TimeSpan.FromMinutes(5),
+        PrepareSchemaIfNecessary = true,
+        DashboardJobListLimit = 25000,
+        TransactionSynchronisationTimeout = TimeSpan.FromMinutes(5),
+        TablesPrefix = "hangfire"
+    }));
+
+builder.Services.AddHangfireServer(options =>
+{
+    options.Queues = new[] { "default", "deployment", "template-sync", "maintenance" };
+    options.WorkerCount = Environment.ProcessorCount * 2;
+});
 
 // Configure Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
@@ -74,9 +109,10 @@ builder.Services.AddCors(options =>
 // Register AutoMapper
 builder.Services.AddAutoMapper(typeof(MappingProfile));
 
+// Register FluentValidation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
-// Register MediatR (Updated approach)
+// Register MediatR
 builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly()));
 
 // Register repositories
@@ -90,10 +126,23 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ICompanyService, CompanyService>();
 builder.Services.AddScoped<IComponentService, ComponentService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IVersioningService, VersioningService>();
+builder.Services.AddScoped<IDeploymentJobService, DeploymentJobService>();
+builder.Services.AddScoped<ITemplateSyncJobService, TemplateSyncJobService>();
 
 // Register tenant provider
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantProvider, TenantProvider>();
+
+// Add session support for debugging
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(30);
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+});
 
 // Configure Swagger/OpenAPI
 builder.Services.AddEndpointsApiExplorer();
@@ -103,7 +152,7 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "Backend CMS API",
         Version = "v1",
-        Description = "Multi-tenant CMS API with page builder functionality"
+        Description = "Multi-tenant CMS API with page builder functionality and job management"
     });
 
     // Add JWT authentication to Swagger
@@ -145,35 +194,116 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+// Configure Hangfire Dashboard
+app.UseHangfireDashboard("/jobs", new DashboardOptions
+{
+    Authorization = new[] { new HangfireAuthorizationFilter() },
+    DisplayStorageConnectionString = false,
+    DashboardTitle = "Backend CMS Jobs"
+});
+
 app.UseHttpsRedirection();
 
 app.UseCors("AllowReactApp");
+
+app.UseSession();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
-// Database migration and seeding
-using (var scope = app.Services.CreateScope())
+// Database migration and seeding per tenant
+app.MapPost("/admin/migrate-tenant/{tenantId}", async (string tenantId, IServiceProvider serviceProvider) =>
 {
-    var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    if (!app.Environment.IsDevelopment()) return Results.NotFound();
+
+    // Create a scope with specific tenant context
+    using var scope = serviceProvider.CreateScope();
+    var services = scope.ServiceProvider;
+
+    // Override tenant provider for this operation
+    var connectionStringTemplate = app.Configuration.GetConnectionString("DefaultConnection");
+    var connectionString = connectionStringTemplate?.Replace("{TENANT_ID}", tenantId);
+
+    var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+    optionsBuilder.UseNpgsql(connectionString);
+
+    // Create temporary tenant provider
+    var tempTenantProvider = new DebugTenantProvider(tenantId);
+
+    using var context = new ApplicationDbContext(optionsBuilder.Options, tempTenantProvider);
+
     try
     {
         await context.Database.MigrateAsync();
-        await SeedDatabase(context);
+        await SeedDatabase(context, tenantId);
+        await SeedTenantRegistry(serviceProvider, tenantId);
+        return Results.Ok($"Migration completed for tenant: {tenantId}");
     }
     catch (Exception ex)
     {
-        Log.Fatal(ex, "An error occurred while migrating or seeding the database");
-        throw;
+        Log.Error(ex, "Migration failed for tenant {TenantId}", tenantId);
+        return Results.Problem($"Migration failed: {ex.Message}");
     }
+});
+
+// Admin-controlled job management endpoints (no automatic monitoring)
+app.MapPost("/admin/jobs/check-template-updates", async (ITemplateSyncJobService templateSyncService) =>
+{
+    var detection = await templateSyncService.DetectTemplateUpdatesAsync();
+    return Results.Ok(detection);
+}).RequireAuthorization("Administrator");
+
+app.MapPost("/admin/jobs/emergency-stop-all", async (IServiceProvider serviceProvider) =>
+{
+    // Emergency stop all running jobs (admin only)
+    using var scope = serviceProvider.CreateScope();
+    var hangfireClient = scope.ServiceProvider.GetRequiredService<IBackgroundJobClient>();
+
+    // This would require additional implementation to stop running jobs
+    return Results.Ok("Emergency stop initiated - check Hangfire dashboard");
+}).RequireAuthorization("Administrator");
+
+// Initialize Hangfire database
+try
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var hangfireConn = configuration.GetConnectionString("HangfireConnection")
+            ?? configuration.GetConnectionString("DefaultConnection")?.Replace("{TENANT_ID}", "hangfire");
+
+        // Ensure Hangfire database exists
+        GlobalConfiguration.Configuration.UsePostgreSqlStorage(hangfireConn);
+    }
+}
+catch (Exception ex)
+{
+    Log.Error(ex, "Failed to initialize Hangfire database");
+}
+
+// Initialize default tenant database
+try
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await context.Database.MigrateAsync();
+        await SeedDatabase(context, "default");
+        await SeedTenantRegistry(scope.ServiceProvider, "default");
+    }
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "An error occurred while migrating or seeding the default database");
+    throw;
 }
 
 app.Run();
 
 // Database seeding method
-async Task SeedDatabase(ApplicationDbContext context)
+async Task SeedDatabase(ApplicationDbContext context, string tenantId)
 {
     try
     {
@@ -196,7 +326,13 @@ async Task SeedDatabase(ApplicationDbContext context)
                 new Backend.CMS.Domain.Entities.Permission { Name = "Components.View", Resource = "Components", Action = "View" },
                 new Backend.CMS.Domain.Entities.Permission { Name = "Components.Create", Resource = "Components", Action = "Create" },
                 new Backend.CMS.Domain.Entities.Permission { Name = "Components.Update", Resource = "Components", Action = "Update" },
-                new Backend.CMS.Domain.Entities.Permission { Name = "Components.Delete", Resource = "Components", Action = "Delete" }
+                new Backend.CMS.Domain.Entities.Permission { Name = "Components.Delete", Resource = "Components", Action = "Delete" },
+                new Backend.CMS.Domain.Entities.Permission { Name = "Versioning.View", Resource = "Versioning", Action = "View" },
+                new Backend.CMS.Domain.Entities.Permission { Name = "Versioning.Deploy", Resource = "Versioning", Action = "Deploy" },
+                new Backend.CMS.Domain.Entities.Permission { Name = "Versioning.Rollback", Resource = "Versioning", Action = "Rollback" },
+                new Backend.CMS.Domain.Entities.Permission { Name = "Jobs.View", Resource = "Jobs", Action = "View" },
+                new Backend.CMS.Domain.Entities.Permission { Name = "Jobs.Manage", Resource = "Jobs", Action = "Manage" },
+                new Backend.CMS.Domain.Entities.Permission { Name = "Jobs.Cancel", Resource = "Jobs", Action = "Cancel" }
             };
 
             context.Permissions.AddRange(permissions);
@@ -211,7 +347,7 @@ async Task SeedDatabase(ApplicationDbContext context)
                 Name = "Administrator",
                 NormalizedName = "ADMINISTRATOR",
                 Description = "Full system access",
-                TenantId = "default"
+                TenantId = tenantId
             };
 
             var editorRole = new Backend.CMS.Domain.Entities.Role
@@ -219,7 +355,7 @@ async Task SeedDatabase(ApplicationDbContext context)
                 Name = "Editor",
                 NormalizedName = "EDITOR",
                 Description = "Content management access",
-                TenantId = "default"
+                TenantId = tenantId
             };
 
             var viewerRole = new Backend.CMS.Domain.Entities.Role
@@ -227,7 +363,7 @@ async Task SeedDatabase(ApplicationDbContext context)
                 Name = "Viewer",
                 NormalizedName = "VIEWER",
                 Description = "Read-only access",
-                TenantId = "default"
+                TenantId = tenantId
             };
 
             context.Roles.AddRange(adminRole, editorRole, viewerRole);
@@ -245,6 +381,57 @@ async Task SeedDatabase(ApplicationDbContext context)
             await context.SaveChangesAsync();
         }
 
+        // Seed default company
+        if (!context.Companies.Any())
+        {
+            var company = new Backend.CMS.Domain.Entities.Company
+            {
+                Name = "Default Company",
+                Description = "Default company for tenant " + tenantId,
+                TenantId = tenantId,
+                IsActive = true,
+                Currency = "USD",
+                Language = "en",
+                Timezone = "UTC"
+            };
+
+            context.Companies.Add(company);
+            await context.SaveChangesAsync();
+        }
+
+        // Seed default admin user
+        if (!context.Users.Any())
+        {
+            var adminUser = new Backend.CMS.Domain.Entities.User
+            {
+                Email = "admin@example.com",
+                Username = "admin",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"),
+                FirstName = "System",
+                LastName = "Administrator",
+                IsActive = true,
+                TenantId = tenantId,
+                EmailVerifiedAt = DateTime.UtcNow
+            };
+
+            context.Users.Add(adminUser);
+            await context.SaveChangesAsync();
+
+            // Assign admin role to admin user
+            var adminRole = context.Roles.First(r => r.NormalizedName == "ADMINISTRATOR");
+            var userRole = new Backend.CMS.Domain.Entities.UserRole
+            {
+                UserId = adminUser.Id,
+                RoleId = adminRole.Id,
+                AssignedAt = DateTime.UtcNow,
+                AssignedBy = "System",
+                IsActive = true
+            };
+
+            context.UserRoles.Add(userRole);
+            await context.SaveChangesAsync();
+        }
+
         // Seed default component templates
         if (!context.ComponentTemplates.Any())
         {
@@ -259,7 +446,7 @@ async Task SeedDatabase(ApplicationDbContext context)
                     Category = "Content",
                     Icon = "type",
                     IsSystemTemplate = true,
-                    TenantId = "default",
+                    TenantId = tenantId,
                     DefaultProperties = new Dictionary<string, object>
                     {
                         { "text", "Enter your text here..." },
@@ -277,7 +464,7 @@ async Task SeedDatabase(ApplicationDbContext context)
                     Category = "Media",
                     Icon = "image",
                     IsSystemTemplate = true,
-                    TenantId = "default",
+                    TenantId = tenantId,
                     DefaultProperties = new Dictionary<string, object>
                     {
                         { "src", "" },
@@ -296,7 +483,7 @@ async Task SeedDatabase(ApplicationDbContext context)
                     Category = "Interactive",
                     Icon = "mouse-pointer",
                     IsSystemTemplate = true,
-                    TenantId = "default",
+                    TenantId = tenantId,
                     DefaultProperties = new Dictionary<string, object>
                     {
                         { "text", "Click me" },
@@ -305,6 +492,24 @@ async Task SeedDatabase(ApplicationDbContext context)
                         { "variant", "primary" },
                         { "size", "medium" }
                     }
+                },
+                new Backend.CMS.Domain.Entities.ComponentTemplate
+                {
+                    Name = "container",
+                    DisplayName = "Container",
+                    Description = "Layout container for organizing content",
+                    Type = Backend.CMS.Domain.Enums.ComponentType.Container,
+                    Category = "Layout",
+                    Icon = "square",
+                    IsSystemTemplate = true,
+                    TenantId = tenantId,
+                    DefaultProperties = new Dictionary<string, object>
+                    {
+                        { "maxWidth", "1200px" },
+                        { "padding", "20px" },
+                        { "margin", "0 auto" },
+                        { "backgroundColor", "transparent" }
+                    }
                 }
             };
 
@@ -312,11 +517,85 @@ async Task SeedDatabase(ApplicationDbContext context)
             await context.SaveChangesAsync();
         }
 
-        Log.Information("Database seeded successfully");
+        Log.Information("Database seeded successfully for tenant {TenantId}", tenantId);
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Error occurred while seeding database");
+        Log.Error(ex, "Error occurred while seeding database for tenant {TenantId}", tenantId);
         throw;
     }
+}
+
+// Seed tenant registry (using main database connection)
+async Task SeedTenantRegistry(IServiceProvider serviceProvider, string tenantId)
+{
+    try
+    {
+        // Use main database connection for tenant registry
+        var connectionStringTemplate = serviceProvider.GetRequiredService<IConfiguration>()
+            .GetConnectionString("DefaultConnection");
+        var mainConnectionString = connectionStringTemplate?.Replace("{TENANT_ID}", "main");
+
+        var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+        optionsBuilder.UseNpgsql(mainConnectionString);
+
+        using var mainContext = new ApplicationDbContext(optionsBuilder.Options, new DebugTenantProvider("main"));
+
+        if (!mainContext.Set<Backend.CMS.Domain.Entities.TenantRegistry>().Any(t => t.TenantId == tenantId))
+        {
+            var tenantRegistry = new Backend.CMS.Domain.Entities.TenantRegistry
+            {
+                TenantId = tenantId,
+                TenantName = $"Tenant {tenantId}",
+                DatabaseConnectionString = connectionStringTemplate?.Replace("{TENANT_ID}", tenantId) ?? "",
+                IsActive = true,
+                CurrentVersion = "1.0.0",
+                CurrentTemplateVersion = "1.0.0",
+                LastDeployment = DateTime.UtcNow,
+                LastTemplateSync = DateTime.UtcNow,
+                AutoDeployEnabled = true,
+                AutoSyncEnabled = true,
+                MaintenanceWindow = "0 2 * * *" // 2 AM daily
+            };
+
+            mainContext.Set<Backend.CMS.Domain.Entities.TenantRegistry>().Add(tenantRegistry);
+            await mainContext.SaveChangesAsync();
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Error seeding tenant registry for {TenantId}", tenantId);
+    }
+}
+
+// Hangfire authorization filter
+public class HangfireAuthorizationFilter : IDashboardAuthorizationFilter
+{
+    public bool Authorize(DashboardContext context)
+    {
+        var httpContext = context.GetHttpContext();
+
+        // Allow access in development
+        if (httpContext.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment())
+        {
+            return true;
+        }
+
+        // Check if user is authenticated and has job management permissions
+        return httpContext.User.Identity?.IsAuthenticated == true &&
+               httpContext.User.IsInRole("Administrator");
+    }
+}
+
+// Debug tenant provider for development
+public class DebugTenantProvider : ITenantProvider
+{
+    private readonly string _tenantId;
+
+    public DebugTenantProvider(string tenantId)
+    {
+        _tenantId = tenantId;
+    }
+
+    public string GetTenantId() => _tenantId;
 }

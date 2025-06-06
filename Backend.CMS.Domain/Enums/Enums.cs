@@ -33,4 +33,69 @@ namespace Backend.CMS.Domain.Enums
         Header = 14,
         Sidebar = 15
     }
+    public enum DeploymentStatus
+    {
+        Pending = 0,
+        InProgress = 1,
+        Completed = 2,
+        Failed = 3,
+        RolledBack = 4,
+        Cancelled = 5
+    }
+
+    public enum SyncStatus
+    {
+        Pending = 0,
+        InProgress = 1,
+        Completed = 2,
+        Failed = 3,
+        ConflictDetected = 4,
+        ManualReviewRequired = 5
+    }
+
+    public enum ConflictResolutionStrategy
+    {
+        UseLocal = 0,
+        UseMaster = 1,
+        Merge = 2,
+        Skip = 3,
+        ManualReview = 4
+    }
+
+    public enum JobStatus
+    {
+        Scheduled = 0,
+        InProgress = 1,
+        Completed = 2,
+        Failed = 3,
+        Cancelled = 4,
+        PartiallyCompleted = 5
+    }
+
+    public enum JobType
+    {
+        Deployment = 0,
+        TemplateSync = 1,
+        Rollback = 2,
+        Maintenance = 3
+    }
+
+    public enum JobPriority
+    {
+        Low = 0,
+        Normal = 1,
+        High = 2,
+        Critical = 3
+    }
+
+    public enum ProposalStatus
+    {
+        Pending = 0,
+        UnderReview = 1,
+        Approved = 2,
+        Rejected = 3,
+        Scheduled = 4,
+        Executed = 5,
+        Cancelled = 6
+    }
 }

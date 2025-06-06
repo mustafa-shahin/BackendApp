@@ -31,10 +31,26 @@ namespace Backend.CMS.Domain.Entities
         public string? EmailVerificationToken { get; set; }
         public DateTime? PasswordChangedAt { get; set; }
 
+        // Address information (for future e-commerce)
+        public string? BillingAddress { get; set; }
+        public string? BillingCity { get; set; }
+        public string? BillingState { get; set; }
+        public string? BillingCountry { get; set; }
+        public string? BillingPostalCode { get; set; }
+        public string? ShippingAddress { get; set; }
+        public string? ShippingCity { get; set; }
+        public string? ShippingState { get; set; }
+        public string? ShippingCountry { get; set; }
+        public string? ShippingPostalCode { get; set; }
+        public string? Phone { get; set; }
+        public DateTime? DateOfBirth { get; set; }
+        public string? Gender { get; set; }
+
         // Preferences
         public Dictionary<string, object> Preferences { get; set; } = new();
 
         // Navigation properties
         public ICollection<UserSession> Sessions { get; set; } = new List<UserSession>();
+        public ICollection<PasswordResetToken> PasswordResetTokens { get; set; } = new List<PasswordResetToken>();
     }
 }
