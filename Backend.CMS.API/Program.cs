@@ -1,6 +1,7 @@
     using Backend.CMS.Application.Interfaces;
     using Backend.CMS.Application.Interfaces.Services;
-    using Backend.CMS.Infrastructure.Data;
+using Backend.CMS.Domain.Entities;
+using Backend.CMS.Infrastructure.Data;
     using Backend.CMS.Infrastructure.Mapping;
     using Backend.CMS.Infrastructure.Repositories;
     using Backend.CMS.Infrastructure.Services;
@@ -64,47 +65,78 @@
         options.WorkerCount = Environment.ProcessorCount * 2;
     });
 
-    // Configure Authentication
-    var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-    var secretKey = jwtSettings["SecretKey"];
+// Configure Authentication
+var jwtSettings = builder.Configuration.GetSection("JwtSettings");
+var secretKey = jwtSettings["SecretKey"];
 
-    builder.Services.AddAuthentication(options =>
+if (string.IsNullOrEmpty(secretKey))
+{
+    throw new InvalidOperationException("JWT SecretKey is not configured");
+}
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.SaveToken = true;
+    options.RequireHttpsMetadata = false; // Set to true in production
+    options.TokenValidationParameters = new TokenValidationParameters
     {
-        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-    })
-    .AddJwtBearer(options =>
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtSettings["Issuer"],
+        ValidAudience = jwtSettings["Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+        ClockSkew = TimeSpan.Zero,
+        // Add these for better debugging
+        RequireExpirationTime = true,
+        RequireSignedTokens = true
+    };
+
+    // Add event handlers for debugging
+    options.Events = new JwtBearerEvents
     {
-        options.TokenValidationParameters = new TokenValidationParameters
+        OnAuthenticationFailed = context =>
         {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSettings["Issuer"],
-            ValidAudience = jwtSettings["Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!)),
-            ClockSkew = TimeSpan.Zero
-        };
-    });
-
-    // Configure Authorization
-    builder.Services.AddAuthorization();
-
-    // Configure CORS
-    builder.Services.AddCors(options =>
-    {
-        options.AddPolicy("AllowReactApp", policy =>
+            Console.WriteLine($"Authentication failed: {context.Exception.Message}");
+            return Task.CompletedTask;
+        },
+        OnTokenValidated = context =>
         {
-            policy.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? new[] { "http://localhost:3000" })
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        });
-    });
+            Console.WriteLine($"Token validated for: {context.Principal.Identity.Name}");
+            return Task.CompletedTask;
+        },
+        OnChallenge = context =>
+        {
+            Console.WriteLine($"Authentication challenge: {context.Error}, {context.ErrorDescription}");
+            return Task.CompletedTask;
+        }
+    };
+});
 
-    // Register AutoMapper
-    builder.Services.AddAutoMapper(typeof(MappingProfile));
+// Make sure this comes AFTER AddAuthentication
+builder.Services.AddAuthorization();
+
+// Configure CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReactApp", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials()
+              .SetPreflightMaxAge(TimeSpan.FromMinutes(10)); // Cache preflight for 10 minutes
+    });
+});   
+// Register AutoMapper
+builder.Services.AddAutoMapper(typeof(MappingProfile));
 
     // Register FluentValidation
     builder.Services.AddValidatorsFromAssemblyContaining<Program>();
@@ -116,9 +148,27 @@
     builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
     builder.Services.AddScoped<IPageRepository, PageRepository>();
     builder.Services.AddScoped<IUserRepository, UserRepository>();
+    builder.Services.AddScoped<IRepository<Role>, Repository<Role>>();
+    builder.Services.AddScoped<IRepository<UserRole>, Repository<UserRole>>();
+builder.Services.AddScoped<IRepository<Role>, Repository<Role>>();
+builder.Services.AddScoped<IRepository<UserRole>, Repository<UserRole>>();
+builder.Services.AddScoped<IRepository<Permission>, Repository<Permission>>();
+builder.Services.AddScoped<IRepository<RolePermission>, Repository<RolePermission>>();
+builder.Services.AddScoped<IRepository<UserSession>, Repository<UserSession>>();
+builder.Services.AddScoped<IRepository<PasswordResetToken>, Repository<PasswordResetToken>>();
+builder.Services.AddScoped<IRepository<Company>, Repository<Company>>();
+builder.Services.AddScoped<IRepository<Location>, Repository<Location>>();
+builder.Services.AddScoped<IRepository<ComponentTemplate>, Repository<ComponentTemplate>>();
+builder.Services.AddScoped<IRepository<DeploymentVersion>, Repository<DeploymentVersion>>();
+builder.Services.AddScoped<IRepository<TemplateSyncLog>, Repository<TemplateSyncLog>>();
+builder.Services.AddScoped<IRepository<DeploymentJob>, Repository<DeploymentJob>>();
+builder.Services.AddScoped<IRepository<TemplateSyncJob>, Repository<TemplateSyncJob>>();
+builder.Services.AddScoped<IRepository<TenantRegistry>, Repository<TenantRegistry>>();
+builder.Services.AddScoped<IRepository<DeploymentProposal>, Repository<DeploymentProposal>>();
+builder.Services.AddScoped<IRepository<TemplateUpdateProposal>, Repository<TemplateUpdateProposal>>();
 
-    // Register services
-    builder.Services.AddScoped<IPageService, PageService>();
+// Register services
+builder.Services.AddScoped<IPageService, PageService>();
     builder.Services.AddScoped<IUserService, UserService>();
     builder.Services.AddScoped<IAuthService, AuthService>();
     builder.Services.AddScoped<ICompanyService, CompanyService>();
@@ -180,35 +230,45 @@
 
     var app = builder.Build();
 
-    // Configure the HTTP request pipeline
-    if (app.Environment.IsDevelopment())
+// Configure the HTTP request pipeline
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
     {
-        app.UseSwagger();
-        app.UseSwaggerUI(c =>
-        {
-            c.SwaggerEndpoint("/swagger/v1/swagger.json", "Backend CMS API V1");
-            c.RoutePrefix = "swagger";
-        });
-    }
-
-    // Configure Hangfire Dashboard
-    app.UseHangfireDashboard("/jobs", new DashboardOptions
-    {
-        Authorization = [new HangfireAuthorizationFilter()],
-        DisplayStorageConnectionString = false,
-        DashboardTitle = "Backend CMS Jobs"
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Backend CMS API V1");
+        c.RoutePrefix = "swagger";
     });
+}
 
-    app.UseHttpsRedirection();
+// Configure Hangfire Dashboard
+app.UseHangfireDashboard("/jobs", new DashboardOptions
+{
+    Authorization = [new HangfireAuthorizationFilter()],
+    DisplayStorageConnectionString = false,
+    DashboardTitle = "Backend CMS Jobs"
+});
 
-    app.UseCors("AllowReactApp");
 
-    app.UseSession();
+//app.UseHttpsRedirection();
 
-    app.UseAuthentication();
-    app.UseAuthorization();
+app.UseSession();
+app.UseCors("AllowReactApp");
+app.UseAuthentication();  
+app.UseAuthorization();
 
-    app.MapControllers();
+app.Use(async (context, next) =>
+{
+    Console.WriteLine($"=== REQUEST: {context.Request.Method} {context.Request.Path} ===");
+    Console.WriteLine($"Host: {context.Request.Host}");
+    Console.WriteLine($"ContentType: {context.Request.ContentType}");
+    Console.WriteLine($"Headers: {string.Join(", ", context.Request.Headers.Select(h => $"{h.Key}={h.Value}"))}");
+
+    await next();
+
+    Console.WriteLine($"=== RESPONSE: {context.Response.StatusCode} ===");
+});
+app.MapControllers();
 
     // Database migration and seeding per tenant
     app.MapPost("/admin/migrate-tenant/{tenantId}", async (string tenantId, IServiceProvider serviceProvider) =>

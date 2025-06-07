@@ -1,3 +1,4 @@
+using Backend.CMS.Application.DTOs;
 using Backend.CMS.Application.DTOs.Users;
 using Backend.CMS.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -10,12 +11,57 @@ namespace Backend.CMS.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly IUserService _userService;
         private readonly ILogger<AuthController> _logger;
 
-        public AuthController(IAuthService authService, ILogger<AuthController> logger)
+        public AuthController(IAuthService authService, IUserService userService, ILogger<AuthController> logger)
         {
             _authService = authService;
+            _userService = userService;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// Register a new user
+        /// </summary>
+        [HttpPost("register")]
+        [AllowAnonymous]  
+        public async Task<ActionResult> Register([FromBody] RegisterDto registerDto)
+        {
+            try
+            {
+                var createUserDto = new CreateUserDto
+                {
+                    Email = registerDto.Email,
+                    Username = registerDto.Username,
+                    Password = registerDto.Password,
+                    FirstName = registerDto.FirstName,
+                    LastName = registerDto.LastName,
+                    IsActive = true,
+                    RoleIds = [], 
+                    Preferences = []
+                };
+
+                var user = await _userService.CreateUserAsync(createUserDto);
+                _logger.LogInformation("User registered successfully: {Email}", registerDto.Email);
+
+                return Ok(new
+                {
+                    Success = true,
+                    Message = "User registered successfully",
+                    UserId = user.Id
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning("User registration failed: {Message}", ex.Message);
+                return BadRequest(new { Message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during user registration for {Email}", registerDto.Email);
+                return StatusCode(500, new { Message = "An error occurred during registration" });
+            }
         }
 
         /// <summary>
@@ -260,7 +306,13 @@ namespace Backend.CMS.API.Controllers
             }
             return userId;
         }
-
+        [HttpGet("test")]
+        public IActionResult Test()
+        {
+            Console.WriteLine("=== TEST ENDPOINT HIT ===");
+            return Ok(new { Message = "AuthController is working", Timestamp = DateTime.Now });
+        }
+    
         private string GenerateQrCodeUrl(string secret)
         {
             // Generate QR code URL for 2FA apps like Google Authenticator
@@ -270,25 +322,33 @@ namespace Backend.CMS.API.Controllers
         }
     }
 
-    public class ForgotPasswordDto
-    {
-        public string Email { get; set; } = string.Empty;
-    }
+    //public class ForgotPasswordDto
+    //{
+    //    public string Email { get; set; } = string.Empty;
+    //}
 
-    public class ResetPasswordDto
-    {
-        public string Token { get; set; } = string.Empty;
-        public string NewPassword { get; set; } = string.Empty;
-    }
+    //public class ResetPasswordDto
+    //{
+    //    public string Token { get; set; } = string.Empty;
+    //    public string NewPassword { get; set; } = string.Empty;
+    //}
 
-    public class Enable2FAResponseDto
-    {
-        public string Secret { get; set; } = string.Empty;
-        public string QrCodeUrl { get; set; } = string.Empty;
-    }
+    //public class Enable2FAResponseDto
+    //{
+    //    public string Secret { get; set; } = string.Empty;
+    //    public string QrCodeUrl { get; set; } = string.Empty;
+    //}
 
-    public class Verify2FADto
-    {
-        public string Code { get; set; } = string.Empty;
-    }
+    //public class Verify2FADto
+    //{
+    //    public string Code { get; set; } = string.Empty;
+    //}
+    //public class RegisterDto
+    //{
+    //    public string Email { get; set; } = string.Empty;
+    //    public string Username { get; set; } = string.Empty;
+    //    public string Password { get; set; } = string.Empty;
+    //    public string FirstName { get; set; } = string.Empty;
+    //    public string LastName { get; set; } = string.Empty;
+    //}
 }

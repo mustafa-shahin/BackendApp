@@ -232,15 +232,23 @@ namespace Backend.CMS.Infrastructure.Services
 
         public async Task<UserDto> GetCurrentUserAsync()
         {
-            var userId = GetCurrentUserId();
-            var user = await _userRepository.GetWithRolesAsync(userId);
-
-            if (user == null)
+            try
             {
-                throw new UnauthorizedAccessException("User not found");
-            }
+                var userId = GetCurrentUserId();
+                var user = await _userRepository.GetWithRolesAsync(userId);
 
-            return _mapper.Map<UserDto>(user);
+                if (user == null)
+                {
+                    throw new UnauthorizedAccessException("User not found");
+                }
+
+                return _mapper.Map<UserDto>(user);
+            }
+            catch (Exception ex)
+            {
+                // Log the specific error for debugging
+                throw new UnauthorizedAccessException($"Failed to get current user: {ex.Message}");
+            }
         }
 
         public async Task<bool> ForgotPasswordAsync(string email)
@@ -429,28 +437,34 @@ namespace Backend.CMS.Infrastructure.Services
             return true;
         }
 
+        // Update your AuthService.cs GenerateAccessToken method:
+
         private string GenerateAccessToken(User user)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(GetJwtSecretKey());
 
             var claims = new List<Claim>
-            {
-                new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new(JwtRegisteredClaimNames.Email, user.Email),
-                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                new("userId", user.Id.ToString()),
-                new("firstName", user.FirstName),
-                new("lastName", user.LastName),
-                new("tenantId", user.TenantId)
-            };
+    {
+        new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+        new(JwtRegisteredClaimNames.Email, user.Email),
+        new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+        new(JwtRegisteredClaimNames.Iat,
+            new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds().ToString(),
+            ClaimValueTypes.Integer64),
+        new("userId", user.Id.ToString()),
+        new("firstName", user.FirstName),
+        new("lastName", user.LastName),
+        new("tenantId", user.TenantId)
+    };
 
-            // Add role claims
+            // Add role claims - make sure roles are loaded
             if (user.UserRoles?.Any() == true)
             {
                 foreach (var userRole in user.UserRoles.Where(ur => ur.IsActive))
                 {
                     claims.Add(new Claim(ClaimTypes.Role, userRole.Role.Name));
+                    claims.Add(new Claim("role", userRole.Role.Name)); // Add both formats
                 }
             }
 
@@ -460,7 +474,7 @@ namespace Backend.CMS.Infrastructure.Services
                 Expires = DateTime.UtcNow.AddMinutes(GetAccessTokenExpiryMinutes()),
                 Issuer = GetJwtIssuer(),
                 Audience = GetJwtAudience(),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256)
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
             };
 
             var token = tokenHandler.CreateToken(tokenDescriptor);
@@ -489,14 +503,28 @@ namespace Backend.CMS.Infrastructure.Services
             return $"{random.Next(1000, 9999)}-{random.Next(1000, 9999)}";
         }
 
-        private Guid GetCurrentUserId()
+       private Guid GetCurrentUserId()
         {
-            var userIdClaim = _httpContextAccessor.HttpContext?.User.FindFirst("sub") ??
-                            _httpContextAccessor.HttpContext?.User.FindFirst("userId");
-
-            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext?.User?.Identity?.IsAuthenticated != true)
             {
-                throw new UnauthorizedAccessException("Invalid user token");
+                throw new UnauthorizedAccessException("User is not authenticated");
+            }
+
+            // Try different claim types
+            var userIdClaim = httpContext.User.FindFirst("sub") ??
+                             httpContext.User.FindFirst("userId") ??
+                             httpContext.User.FindFirst(ClaimTypes.NameIdentifier);
+
+            if (userIdClaim == null)
+            {
+                var allClaims = string.Join(", ", httpContext.User.Claims.Select(c => $"{c.Type}:{c.Value}"));
+                throw new UnauthorizedAccessException($"User ID claim not found. Available claims: {allClaims}");
+            }
+
+            if (!Guid.TryParse(userIdClaim.Value, out var userId))
+            {
+                throw new UnauthorizedAccessException($"Invalid user ID format: {userIdClaim.Value}");
             }
 
             return userId;

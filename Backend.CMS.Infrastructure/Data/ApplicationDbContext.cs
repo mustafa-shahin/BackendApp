@@ -86,15 +86,18 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasMany(e => e.UserRoles)
                     .WithOne(e => e.User)
-                    .HasForeignKey(e => e.UserId);
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasMany(e => e.Sessions)
                     .WithOne(e => e.User)
-                    .HasForeignKey(e => e.UserId);
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasMany(e => e.PasswordResetTokens)
                     .WithOne(e => e.User)
-                    .HasForeignKey(e => e.UserId);
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             // PasswordResetToken configuration
@@ -117,11 +120,13 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasMany(e => e.UserRoles)
                     .WithOne(e => e.Role)
-                    .HasForeignKey(e => e.RoleId);
+                    .HasForeignKey(e => e.RoleId)
+                    .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasMany(e => e.RolePermissions)
                     .WithOne(e => e.Role)
-                    .HasForeignKey(e => e.RoleId);
+                    .HasForeignKey(e => e.RoleId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             // Permission configuration
@@ -135,7 +140,8 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasMany(e => e.RolePermissions)
                     .WithOne(e => e.Permission)
-                    .HasForeignKey(e => e.PermissionId);
+                    .HasForeignKey(e => e.PermissionId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             // UserRole configuration
@@ -173,15 +179,18 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasOne(e => e.ParentPage)
                     .WithMany(e => e.ChildPages)
-                    .HasForeignKey(e => e.ParentPageId);
+                    .HasForeignKey(e => e.ParentPageId)
+                    .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasMany(e => e.Components)
                     .WithOne(e => e.Page)
-                    .HasForeignKey(e => e.PageId);
+                    .HasForeignKey(e => e.PageId)
+                    .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasMany(e => e.Permissions)
                     .WithOne(e => e.Page)
-                    .HasForeignKey(e => e.PageId);
+                    .HasForeignKey(e => e.PageId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             // PageComponent configuration
@@ -198,7 +207,8 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasOne(e => e.ParentComponent)
                     .WithMany(e => e.ChildComponents)
-                    .HasForeignKey(e => e.ParentComponentId);
+                    .HasForeignKey(e => e.ParentComponentId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             // PagePermission configuration
@@ -215,7 +225,8 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasOne(e => e.Page)
                     .WithMany()
-                    .HasForeignKey(e => e.PageId);
+                    .HasForeignKey(e => e.PageId)
+                    .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasOne(e => e.CreatedByUser)
                     .WithMany()
@@ -239,7 +250,8 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasMany(e => e.Locations)
                     .WithOne(e => e.Company)
-                    .HasForeignKey(e => e.CompanyId);
+                    .HasForeignKey(e => e.CompanyId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             // Location configuration
@@ -261,7 +273,8 @@ namespace Backend.CMS.Infrastructure.Data
 
                 entity.HasMany(e => e.OpeningHours)
                     .WithOne(e => e.Location)
-                    .HasForeignKey(e => e.LocationId);
+                    .HasForeignKey(e => e.LocationId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             // LocationOpeningHour configuration
@@ -392,7 +405,7 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.ImpactAnalysis).HasConversion(dictionaryConverter);
             });
 
-            // Global query filters for tenant isolation
+            // Configure global query filters for tenant isolation (only for tenant-specific entities)
             modelBuilder.Entity<User>().HasQueryFilter(e => e.TenantId == _tenantId);
             modelBuilder.Entity<Role>().HasQueryFilter(e => e.TenantId == _tenantId);
             modelBuilder.Entity<Page>().HasQueryFilter(e => e.TenantId == _tenantId);
@@ -401,6 +414,78 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<ComponentTemplate>().HasQueryFilter(e => e.TenantId == _tenantId);
             modelBuilder.Entity<DeploymentVersion>().HasQueryFilter(e => e.TenantId == _tenantId);
             modelBuilder.Entity<TemplateSyncLog>().HasQueryFilter(e => e.TenantId == _tenantId);
+
+            // Set value comparers for collections to avoid EF warnings
+            SetValueComparers(modelBuilder);
+        }
+
+        private void SetValueComparers(ModelBuilder modelBuilder)
+        {
+            var dictionaryComparer = new ValueComparer<Dictionary<string, object>>(
+                (c1, c2) => c1!.SequenceEqual(c2!),
+                c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                c => c.ToDictionary(k => k.Key, k => k.Value));
+
+            var listComparer = new ValueComparer<List<string>>(
+                (c1, c2) => c1!.SequenceEqual(c2!),
+                c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                c => c.ToList());
+
+            // Apply value comparers to dictionary properties
+            modelBuilder.Entity<Company>().Property(e => e.BrandingSettings).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<Company>().Property(e => e.BusinessSettings).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<Company>().Property(e => e.ContactInfo).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<Company>().Property(e => e.SocialMediaLinks).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<ComponentTemplate>().Property(e => e.ConfigSchema).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<ComponentTemplate>().Property(e => e.DefaultProperties).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<ComponentTemplate>().Property(e => e.DefaultStyles).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<ComponentTemplate>().Property(e => e.Schema).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<DeploymentJob>().Property(e => e.FailedTenants).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<DeploymentJob>().Property(e => e.JobMetadata).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<DeploymentJob>().Property(e => e.MigrationData).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<DeploymentProposal>().Property(e => e.AffectedTenants).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<DeploymentProposal>().Property(e => e.ImpactAnalysis).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<DeploymentProposal>().Property(e => e.MigrationData).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<DeploymentProposal>().Property(e => e.PrerequisiteChecks).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<DeploymentProposal>().Property(e => e.RollbackPlan).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<DeploymentVersion>().Property(e => e.DeploymentMetadata).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<DeploymentVersion>().Property(e => e.MigrationData).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<Location>().Property(e => e.AdditionalInfo).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<PageComponent>().Property(e => e.AnimationSettings).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<PageComponent>().Property(e => e.Content).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<PageComponent>().Property(e => e.InteractionSettings).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<PageComponent>().Property(e => e.Properties).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<PageComponent>().Property(e => e.ResponsiveSettings).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<PageComponent>().Property(e => e.Styles).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<TemplateSyncJob>().Property(e => e.ConflictResolutions).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<TemplateSyncJob>().Property(e => e.FailedTenants).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateSyncJob>().Property(e => e.JobMetadata).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.ConflictResolutions).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.FilesAdded).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.FilesDeleted).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.FilesUpdated).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.SyncMetadata).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.AddedFiles).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.AffectedTenants).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.BreakingChanges).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.ChangedFiles).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.ConflictAnalysis).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.DeletedFiles).Metadata.SetValueComparer(listComparer);
+            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.ImpactAnalysis).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<TenantRegistry>().Property(e => e.TenantMetadata).Metadata.SetValueComparer(dictionaryComparer);
+
+            modelBuilder.Entity<User>().Property(e => e.Preferences).Metadata.SetValueComparer(dictionaryComparer);
+            modelBuilder.Entity<User>().Property(e => e.RecoveryCodes).Metadata.SetValueComparer(listComparer);
         }
 
         public override int SaveChanges()
