@@ -32,4 +32,8 @@
 		<ProjectReference Include="..\Backend.CMS.Domain\Backend.CMS.Domain.csproj" />
 		<ProjectReference Include="..\Backend.CMS.Application\Backend.CMS.Application.csproj" />
 	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Migrations\" />
+	</ItemGroup>
 </Project>

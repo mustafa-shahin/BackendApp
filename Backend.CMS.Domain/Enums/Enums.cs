@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.ComponentModel;
 
 namespace Backend.CMS.Domain.Enums
 {
@@ -33,6 +29,22 @@ namespace Backend.CMS.Domain.Enums
         Header = 14,
         Sidebar = 15
     }
+
+    public enum UserRole
+    {
+        [Description("admin")]
+        Admin = 1,
+        [Description("customer")]
+        Customer = 2
+    }
+
+    public enum PageAccessLevel
+    {
+        Public = 0,        // Anyone can access
+        LoggedInOnly = 1,  // Only logged-in users
+        AdminOnly = 2      // Only admin users
+    }
+
     public enum DeploymentStatus
     {
         Pending = 0,

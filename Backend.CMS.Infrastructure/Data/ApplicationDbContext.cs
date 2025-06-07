@@ -1,36 +1,24 @@
 ﻿using Backend.CMS.Domain.Common;
-using Backend.CMS.Domain.Common.Interfaces;
 using Backend.CMS.Domain.Entities;
-using Microsoft.AspNetCore.Http;
+using Backend.CMS.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using System.Data;
-using System.Security;
 using System.Text.Json;
 
 namespace Backend.CMS.Infrastructure.Data
 {
     public class ApplicationDbContext : DbContext
     {
-        private readonly string _tenantId;
-
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, ITenantProvider tenantProvider)
-            : base(options)
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
-            _tenantId = tenantProvider.GetTenantId();
         }
 
         public DbSet<User> Users { get; set; }
-        public DbSet<Role> Roles { get; set; }
-        public DbSet<Permission> Permissions { get; set; }
-        public DbSet<UserRole> UserRoles { get; set; }
-        public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<UserSession> UserSessions { get; set; }
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
         public DbSet<Page> Pages { get; set; }
         public DbSet<PageComponent> PageComponents { get; set; }
-        public DbSet<PagePermission> PagePermissions { get; set; }
         public DbSet<PageVersion> PageVersions { get; set; }
         public DbSet<Company> Companies { get; set; }
         public DbSet<Location> Locations { get; set; }
@@ -38,11 +26,8 @@ namespace Backend.CMS.Infrastructure.Data
         public DbSet<ComponentTemplate> ComponentTemplates { get; set; }
         public DbSet<DeploymentVersion> DeploymentVersions { get; set; }
         public DbSet<TemplateSyncLog> TemplateSyncLogs { get; set; }
-
-        // Added missing DbSets
         public DbSet<DeploymentJob> DeploymentJobs { get; set; }
         public DbSet<TemplateSyncJob> TemplateSyncJobs { get; set; }
-        public DbSet<TenantRegistry> TenantRegistry { get; set; }
         public DbSet<DeploymentProposal> DeploymentProposals { get; set; }
         public DbSet<TemplateUpdateProposal> TemplateUpdateProposals { get; set; }
 
@@ -63,8 +48,8 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<User>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.TenantId, e.Email }).IsUnique();
-                entity.HasIndex(e => new { e.TenantId, e.Username }).IsUnique();
+                entity.HasIndex(e => e.Email).IsUnique();
+                entity.HasIndex(e => e.Username).IsUnique();
                 entity.Property(e => e.Email).HasMaxLength(256);
                 entity.Property(e => e.Username).HasMaxLength(256);
                 entity.Property(e => e.FirstName).HasMaxLength(100);
@@ -83,11 +68,7 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.Gender).HasMaxLength(20);
                 entity.Property(e => e.Preferences).HasConversion(dictionaryConverter);
                 entity.Property(e => e.RecoveryCodes).HasConversion(listConverter);
-
-                entity.HasMany(e => e.UserRoles)
-                    .WithOne(e => e.User)
-                    .HasForeignKey(e => e.UserId)
-                    .OnDelete(DeleteBehavior.Cascade);
+                entity.Property(e => e.Role).HasConversion<string>();
 
                 entity.HasMany(e => e.Sessions)
                     .WithOne(e => e.User)
@@ -110,52 +91,6 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.UserAgent).HasMaxLength(500);
             });
 
-            // Role configuration
-            modelBuilder.Entity<Role>(entity =>
-            {
-                entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.TenantId, e.NormalizedName }).IsUnique();
-                entity.Property(e => e.Name).HasMaxLength(256);
-                entity.Property(e => e.NormalizedName).HasMaxLength(256);
-
-                entity.HasMany(e => e.UserRoles)
-                    .WithOne(e => e.Role)
-                    .HasForeignKey(e => e.RoleId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.RolePermissions)
-                    .WithOne(e => e.Role)
-                    .HasForeignKey(e => e.RoleId)
-                    .OnDelete(DeleteBehavior.Cascade);
-            });
-
-            // Permission configuration
-            modelBuilder.Entity<Permission>(entity =>
-            {
-                entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.Resource, e.Action }).IsUnique();
-                entity.Property(e => e.Name).HasMaxLength(256);
-                entity.Property(e => e.Resource).HasMaxLength(100);
-                entity.Property(e => e.Action).HasMaxLength(100);
-
-                entity.HasMany(e => e.RolePermissions)
-                    .WithOne(e => e.Permission)
-                    .HasForeignKey(e => e.PermissionId)
-                    .OnDelete(DeleteBehavior.Cascade);
-            });
-
-            // UserRole configuration
-            modelBuilder.Entity<UserRole>(entity =>
-            {
-                entity.HasKey(e => new { e.UserId, e.RoleId });
-            });
-
-            // RolePermission configuration
-            modelBuilder.Entity<RolePermission>(entity =>
-            {
-                entity.HasKey(e => new { e.RoleId, e.PermissionId });
-            });
-
             // UserSession configuration
             modelBuilder.Entity<UserSession>(entity =>
             {
@@ -170,12 +105,14 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<Page>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.TenantId, e.Slug }).IsUnique();
+                entity.HasIndex(e => e.Slug).IsUnique();
                 entity.Property(e => e.Name).HasMaxLength(200);
                 entity.Property(e => e.Title).HasMaxLength(200);
                 entity.Property(e => e.Slug).HasMaxLength(200);
                 entity.Property(e => e.MetaTitle).HasMaxLength(200);
                 entity.Property(e => e.MetaDescription).HasMaxLength(500);
+                entity.Property(e => e.Status).HasConversion<string>();
+                entity.Property(e => e.AccessLevel).HasConversion<string>();
 
                 entity.HasOne(e => e.ParentPage)
                     .WithMany(e => e.ChildPages)
@@ -186,11 +123,6 @@ namespace Backend.CMS.Infrastructure.Data
                     .WithOne(e => e.Page)
                     .HasForeignKey(e => e.PageId)
                     .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.Permissions)
-                    .WithOne(e => e.Page)
-                    .HasForeignKey(e => e.PageId)
-                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             // PageComponent configuration
@@ -198,6 +130,7 @@ namespace Backend.CMS.Infrastructure.Data
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Name).HasMaxLength(200);
+                entity.Property(e => e.Type).HasConversion<string>();
                 entity.Property(e => e.Properties).HasConversion(dictionaryConverter);
                 entity.Property(e => e.Styles).HasConversion(dictionaryConverter);
                 entity.Property(e => e.Content).HasConversion(dictionaryConverter);
@@ -209,12 +142,6 @@ namespace Backend.CMS.Infrastructure.Data
                     .WithMany(e => e.ChildComponents)
                     .HasForeignKey(e => e.ParentComponentId)
                     .OnDelete(DeleteBehavior.Restrict);
-            });
-
-            // PagePermission configuration
-            modelBuilder.Entity<PagePermission>(entity =>
-            {
-                entity.HasKey(e => new { e.PageId, e.RoleId });
             });
 
             // PageVersion configuration
@@ -238,7 +165,6 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<Company>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasIndex(e => e.TenantId).IsUnique();
                 entity.Property(e => e.Name).HasMaxLength(200);
                 entity.Property(e => e.Email).HasMaxLength(256);
                 entity.Property(e => e.Phone).HasMaxLength(50);
@@ -288,11 +214,12 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<ComponentTemplate>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.TenantId, e.Name }).IsUnique();
+                entity.HasIndex(e => e.Name).IsUnique();
                 entity.Property(e => e.Name).HasMaxLength(200);
                 entity.Property(e => e.DisplayName).HasMaxLength(200);
                 entity.Property(e => e.Category).HasMaxLength(100);
                 entity.Property(e => e.Icon).HasMaxLength(100);
+                entity.Property(e => e.Type).HasConversion<string>();
                 entity.Property(e => e.DefaultProperties).HasConversion(dictionaryConverter);
                 entity.Property(e => e.DefaultStyles).HasConversion(dictionaryConverter);
                 entity.Property(e => e.Schema).HasConversion(dictionaryConverter);
@@ -303,9 +230,10 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<DeploymentVersion>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.TenantId, e.Version });
+                entity.HasIndex(e => e.Version);
                 entity.Property(e => e.Version).HasMaxLength(50);
                 entity.Property(e => e.DeployedBy).HasMaxLength(256);
+                entity.Property(e => e.Status).HasConversion<string>();
                 entity.Property(e => e.MigrationData).HasConversion(dictionaryConverter);
                 entity.Property(e => e.DeploymentMetadata).HasConversion(dictionaryConverter);
 
@@ -319,10 +247,10 @@ namespace Backend.CMS.Infrastructure.Data
             modelBuilder.Entity<TemplateSyncLog>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.TenantId, e.MasterTemplateVersion });
                 entity.Property(e => e.MasterTemplateVersion).HasMaxLength(50);
                 entity.Property(e => e.PreviousVersion).HasMaxLength(50);
                 entity.Property(e => e.SyncedBy).HasMaxLength(256);
+                entity.Property(e => e.Status).HasConversion<string>();
                 entity.Property(e => e.FilesUpdated).HasConversion(listConverter);
                 entity.Property(e => e.FilesAdded).HasConversion(listConverter);
                 entity.Property(e => e.FilesDeleted).HasConversion(listConverter);
@@ -336,10 +264,10 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.HasKey(e => e.Id);
                 entity.HasIndex(e => e.JobId).IsUnique();
                 entity.Property(e => e.JobId).HasMaxLength(100);
-                entity.Property(e => e.TenantId).HasMaxLength(100);
                 entity.Property(e => e.Version).HasMaxLength(50);
                 entity.Property(e => e.ScheduledBy).HasMaxLength(256);
                 entity.Property(e => e.ExecutedBy).HasMaxLength(256);
+                entity.Property(e => e.Status).HasConversion<string>();
                 entity.Property(e => e.MigrationData).HasConversion(dictionaryConverter);
                 entity.Property(e => e.JobMetadata).HasConversion(dictionaryConverter);
                 entity.Property(e => e.FailedTenants).HasConversion(listConverter);
@@ -351,27 +279,14 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.HasKey(e => e.Id);
                 entity.HasIndex(e => e.JobId).IsUnique();
                 entity.Property(e => e.JobId).HasMaxLength(100);
-                entity.Property(e => e.TenantId).HasMaxLength(100);
                 entity.Property(e => e.MasterTemplateVersion).HasMaxLength(50);
                 entity.Property(e => e.PreviousVersion).HasMaxLength(50);
                 entity.Property(e => e.ScheduledBy).HasMaxLength(256);
                 entity.Property(e => e.ExecutedBy).HasMaxLength(256);
+                entity.Property(e => e.Status).HasConversion<string>();
                 entity.Property(e => e.JobMetadata).HasConversion(dictionaryConverter);
                 entity.Property(e => e.FailedTenants).HasConversion(listConverter);
                 entity.Property(e => e.ConflictResolutions).HasConversion(dictionaryConverter);
-            });
-
-            // TenantRegistry configuration
-            modelBuilder.Entity<TenantRegistry>(entity =>
-            {
-                entity.HasKey(e => e.Id);
-                entity.HasIndex(e => e.TenantId).IsUnique();
-                entity.Property(e => e.TenantId).HasMaxLength(100);
-                entity.Property(e => e.TenantName).HasMaxLength(200);
-                entity.Property(e => e.CurrentVersion).HasMaxLength(50);
-                entity.Property(e => e.CurrentTemplateVersion).HasMaxLength(50);
-                entity.Property(e => e.MaintenanceWindow).HasMaxLength(100);
-                entity.Property(e => e.TenantMetadata).HasConversion(dictionaryConverter);
             });
 
             // DeploymentProposal configuration
@@ -381,6 +296,7 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.Version).HasMaxLength(50);
                 entity.Property(e => e.ProposedBy).HasMaxLength(256);
                 entity.Property(e => e.ReviewedBy).HasMaxLength(256);
+                entity.Property(e => e.Status).HasConversion<string>();
                 entity.Property(e => e.MigrationData).HasConversion(dictionaryConverter);
                 entity.Property(e => e.ImpactAnalysis).HasConversion(dictionaryConverter);
                 entity.Property(e => e.RollbackPlan).HasConversion(dictionaryConverter);
@@ -396,6 +312,7 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.PreviousVersion).HasMaxLength(50);
                 entity.Property(e => e.DetectedBy).HasMaxLength(256);
                 entity.Property(e => e.ReviewedBy).HasMaxLength(256);
+                entity.Property(e => e.Status).HasConversion<string>();
                 entity.Property(e => e.ChangedFiles).HasConversion(listConverter);
                 entity.Property(e => e.AddedFiles).HasConversion(listConverter);
                 entity.Property(e => e.DeletedFiles).HasConversion(listConverter);
@@ -404,16 +321,6 @@ namespace Backend.CMS.Infrastructure.Data
                 entity.Property(e => e.AffectedTenants).HasConversion(listConverter);
                 entity.Property(e => e.ImpactAnalysis).HasConversion(dictionaryConverter);
             });
-
-            // Configure global query filters for tenant isolation (only for tenant-specific entities)
-            modelBuilder.Entity<User>().HasQueryFilter(e => e.TenantId == _tenantId);
-            modelBuilder.Entity<Role>().HasQueryFilter(e => e.TenantId == _tenantId);
-            modelBuilder.Entity<Page>().HasQueryFilter(e => e.TenantId == _tenantId);
-            modelBuilder.Entity<Company>().HasQueryFilter(e => e.TenantId == _tenantId);
-            modelBuilder.Entity<Location>().HasQueryFilter(e => e.TenantId == _tenantId);
-            modelBuilder.Entity<ComponentTemplate>().HasQueryFilter(e => e.TenantId == _tenantId);
-            modelBuilder.Entity<DeploymentVersion>().HasQueryFilter(e => e.TenantId == _tenantId);
-            modelBuilder.Entity<TemplateSyncLog>().HasQueryFilter(e => e.TenantId == _tenantId);
 
             // Set value comparers for collections to avoid EF warnings
             SetValueComparers(modelBuilder);
@@ -432,60 +339,33 @@ namespace Backend.CMS.Infrastructure.Data
                 c => c.ToList());
 
             // Apply value comparers to dictionary properties
-            modelBuilder.Entity<Company>().Property(e => e.BrandingSettings).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<Company>().Property(e => e.BusinessSettings).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<Company>().Property(e => e.ContactInfo).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<Company>().Property(e => e.SocialMediaLinks).Metadata.SetValueComparer(dictionaryComparer);
+            var entities = new[]
+            {
+                typeof(Company), typeof(ComponentTemplate), typeof(DeploymentJob),
+                typeof(DeploymentProposal), typeof(DeploymentVersion), typeof(Location),
+                typeof(PageComponent), typeof(TemplateSyncJob), typeof(TemplateSyncLog),
+                typeof(TemplateUpdateProposal), typeof(User)
+            };
 
-            modelBuilder.Entity<ComponentTemplate>().Property(e => e.ConfigSchema).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<ComponentTemplate>().Property(e => e.DefaultProperties).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<ComponentTemplate>().Property(e => e.DefaultStyles).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<ComponentTemplate>().Property(e => e.Schema).Metadata.SetValueComparer(dictionaryComparer);
+            foreach (var entityType in entities)
+            {
+                var entity = modelBuilder.Entity(entityType);
+                var properties = entityType.GetProperties()
+                    .Where(p => p.PropertyType == typeof(Dictionary<string, object>));
 
-            modelBuilder.Entity<DeploymentJob>().Property(e => e.FailedTenants).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<DeploymentJob>().Property(e => e.JobMetadata).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<DeploymentJob>().Property(e => e.MigrationData).Metadata.SetValueComparer(dictionaryComparer);
+                foreach (var property in properties)
+                {
+                    entity.Property(property.Name).Metadata.SetValueComparer(dictionaryComparer);
+                }
 
-            modelBuilder.Entity<DeploymentProposal>().Property(e => e.AffectedTenants).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<DeploymentProposal>().Property(e => e.ImpactAnalysis).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<DeploymentProposal>().Property(e => e.MigrationData).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<DeploymentProposal>().Property(e => e.PrerequisiteChecks).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<DeploymentProposal>().Property(e => e.RollbackPlan).Metadata.SetValueComparer(dictionaryComparer);
+                var listProperties = entityType.GetProperties()
+                    .Where(p => p.PropertyType == typeof(List<string>));
 
-            modelBuilder.Entity<DeploymentVersion>().Property(e => e.DeploymentMetadata).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<DeploymentVersion>().Property(e => e.MigrationData).Metadata.SetValueComparer(dictionaryComparer);
-
-            modelBuilder.Entity<Location>().Property(e => e.AdditionalInfo).Metadata.SetValueComparer(dictionaryComparer);
-
-            modelBuilder.Entity<PageComponent>().Property(e => e.AnimationSettings).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<PageComponent>().Property(e => e.Content).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<PageComponent>().Property(e => e.InteractionSettings).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<PageComponent>().Property(e => e.Properties).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<PageComponent>().Property(e => e.ResponsiveSettings).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<PageComponent>().Property(e => e.Styles).Metadata.SetValueComparer(dictionaryComparer);
-
-            modelBuilder.Entity<TemplateSyncJob>().Property(e => e.ConflictResolutions).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<TemplateSyncJob>().Property(e => e.FailedTenants).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateSyncJob>().Property(e => e.JobMetadata).Metadata.SetValueComparer(dictionaryComparer);
-
-            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.ConflictResolutions).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.FilesAdded).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.FilesDeleted).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.FilesUpdated).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateSyncLog>().Property(e => e.SyncMetadata).Metadata.SetValueComparer(dictionaryComparer);
-
-            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.AddedFiles).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.AffectedTenants).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.BreakingChanges).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.ChangedFiles).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.ConflictAnalysis).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.DeletedFiles).Metadata.SetValueComparer(listComparer);
-            modelBuilder.Entity<TemplateUpdateProposal>().Property(e => e.ImpactAnalysis).Metadata.SetValueComparer(dictionaryComparer);
-
-            modelBuilder.Entity<TenantRegistry>().Property(e => e.TenantMetadata).Metadata.SetValueComparer(dictionaryComparer);
-
-            modelBuilder.Entity<User>().Property(e => e.Preferences).Metadata.SetValueComparer(dictionaryComparer);
-            modelBuilder.Entity<User>().Property(e => e.RecoveryCodes).Metadata.SetValueComparer(listComparer);
+                foreach (var property in listProperties)
+                {
+                    entity.Property(property.Name).Metadata.SetValueComparer(listComparer);
+                }
+            }
         }
 
         public override int SaveChanges()
@@ -514,39 +394,12 @@ namespace Backend.CMS.Infrastructure.Data
                 {
                     entity.CreatedAt = now;
                     entity.UpdatedAt = now;
-
-                    if (entity is ITenantEntity tenantEntity && string.IsNullOrEmpty(tenantEntity.TenantId))
-                    {
-                        tenantEntity.TenantId = _tenantId;
-                    }
                 }
                 else if (entry.State == EntityState.Modified)
                 {
                     entity.UpdatedAt = now;
                 }
             }
-        }
-    }
-
-    public interface ITenantProvider
-    {
-        string GetTenantId();
-    }
-
-    public class TenantProvider : ITenantProvider
-    {
-        private readonly IHttpContextAccessor _httpContextAccessor;
-
-        public TenantProvider(IHttpContextAccessor httpContextAccessor)
-        {
-            _httpContextAccessor = httpContextAccessor;
-        }
-
-        public string GetTenantId()
-        {
-            // Get tenant from HTTP context, configuration, or other source
-            var tenantId = _httpContextAccessor.HttpContext?.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-            return tenantId ?? "default";
         }
     }
 }

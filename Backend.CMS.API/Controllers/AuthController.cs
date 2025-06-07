@@ -1,354 +1,550 @@
-using Backend.CMS.Application.DTOs;
+using AutoMapper;
 using Backend.CMS.Application.DTOs.Users;
+using Backend.CMS.Application.Interfaces;
 using Backend.CMS.Application.Interfaces.Services;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using Backend.CMS.Domain.Entities;
+using Backend.CMS.Domain.Enums;
+using Backend.CMS.Infrastructure.Repositories;
+using BCrypt.Net;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+using OtpNet;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
-namespace Backend.CMS.API.Controllers
+namespace Backend.CMS.Infrastructure.Services
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class AuthController : ControllerBase
+    public class AuthService : IAuthService
     {
-        private readonly IAuthService _authService;
-        private readonly IUserService _userService;
-        private readonly ILogger<AuthController> _logger;
+        private readonly IUserRepository _userRepository;
+        private readonly IRepository<UserSession> _sessionRepository;
+        private readonly IRepository<PasswordResetToken> _passwordResetRepository;
+        private readonly IConfiguration _configuration;
+        private readonly IMapper _mapper;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IEmailService _emailService;
 
-        public AuthController(IAuthService authService, IUserService userService, ILogger<AuthController> logger)
+        public AuthService(
+            IUserRepository userRepository,
+            IRepository<UserSession> sessionRepository,
+            IRepository<PasswordResetToken> passwordResetRepository,
+            IConfiguration configuration,
+            IMapper mapper,
+            IHttpContextAccessor httpContextAccessor,
+            IEmailService emailService)
         {
-            _authService = authService;
-            _userService = userService;
-            _logger = logger;
+            _userRepository = userRepository;
+            _sessionRepository = sessionRepository;
+            _passwordResetRepository = passwordResetRepository;
+            _configuration = configuration;
+            _mapper = mapper;
+            _httpContextAccessor = httpContextAccessor;
+            _emailService = emailService;
         }
 
-        /// <summary>
-        /// Register a new user
-        /// </summary>
-        [HttpPost("register")]
-        [AllowAnonymous]  
-        public async Task<ActionResult> Register([FromBody] RegisterDto registerDto)
+        public async Task<LoginResponseDto> LoginAsync(LoginDto loginDto)
         {
-            try
+            var user = await _userRepository.GetByEmailAsync(loginDto.Email);
+
+            if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
             {
-                var createUserDto = new CreateUserDto
+                // Increment failed attempts for existing user
+                if (user != null)
                 {
-                    Email = registerDto.Email,
-                    Username = registerDto.Username,
-                    Password = registerDto.Password,
-                    FirstName = registerDto.FirstName,
-                    LastName = registerDto.LastName,
-                    IsActive = true,
-                    RoleIds = [], 
-                    Preferences = []
+                    user.FailedLoginAttempts++;
+                    if (user.FailedLoginAttempts >= 5)
+                    {
+                        user.IsLocked = true;
+                        user.LockoutEnd = DateTime.UtcNow.AddMinutes(30);
+                        await _emailService.SendAccountLockedEmailAsync(user.Email, user.FirstName);
+                    }
+                    _userRepository.Update(user);
+                    await _userRepository.SaveChangesAsync();
+                }
+
+                throw new UnauthorizedAccessException("Invalid email or password");
+            }
+
+            if (!user.IsActive)
+            {
+                throw new UnauthorizedAccessException("Account is deactivated");
+            }
+
+            if (user.IsLocked)
+            {
+                if (user.LockoutEnd.HasValue && user.LockoutEnd > DateTime.UtcNow)
+                {
+                    var remainingTime = user.LockoutEnd.Value - DateTime.UtcNow;
+                    throw new UnauthorizedAccessException($"Account is locked for {remainingTime.Minutes} more minutes");
+                }
+
+                // Unlock if lockout period has expired
+                user.IsLocked = false;
+                user.LockoutEnd = null;
+                user.FailedLoginAttempts = 0;
+                _userRepository.Update(user);
+                await _userRepository.SaveChangesAsync();
+            }
+
+            // Check for 2FA
+            if (user.TwoFactorEnabled && string.IsNullOrEmpty(loginDto.TwoFactorCode))
+            {
+                return new LoginResponseDto
+                {
+                    RequiresTwoFactor = true
                 };
+            }
 
-                var user = await _userService.CreateUserAsync(createUserDto);
-                _logger.LogInformation("User registered successfully: {Email}", registerDto.Email);
-
-                return Ok(new
+            if (user.TwoFactorEnabled && !string.IsNullOrEmpty(loginDto.TwoFactorCode))
+            {
+                var isValidCode = await Verify2FACodeAsync(user.Id, loginDto.TwoFactorCode);
+                if (!isValidCode)
                 {
-                    Success = true,
-                    Message = "User registered successfully",
-                    UserId = user.Id
-                });
+                    // Check if it's a recovery code
+                    var isRecoveryCode = await UseRecoveryCodeAsync(user.Id, loginDto.TwoFactorCode);
+                    if (!isRecoveryCode)
+                    {
+                        throw new UnauthorizedAccessException("Invalid two-factor authentication code");
+                    }
+                }
             }
-            catch (ArgumentException ex)
+
+            // Reset failed login attempts
+            user.FailedLoginAttempts = 0;
+            user.LastLoginAt = DateTime.UtcNow;
+            _userRepository.Update(user);
+
+            // Generate tokens
+            var accessToken = GenerateAccessToken(user);
+            var refreshToken = GenerateRefreshToken();
+
+            // Save session
+            var session = new UserSession
             {
-                _logger.LogWarning("User registration failed: {Message}", ex.Message);
-                return BadRequest(new { Message = ex.Message });
-            }
-            catch (Exception ex)
+                UserId = user.Id,
+                RefreshToken = refreshToken,
+                IpAddress = GetClientIpAddress(),
+                UserAgent = GetUserAgent(),
+                ExpiresAt = DateTime.UtcNow.AddDays(GetRefreshTokenExpiryDays())
+            };
+
+            await _sessionRepository.AddAsync(session);
+            await _sessionRepository.SaveChangesAsync();
+
+            var userDto = _mapper.Map<UserDto>(user);
+
+            return new LoginResponseDto
             {
-                _logger.LogError(ex, "Error during user registration for {Email}", registerDto.Email);
-                return StatusCode(500, new { Message = "An error occurred during registration" });
-            }
+                AccessToken = accessToken,
+                RefreshToken = refreshToken,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(GetAccessTokenExpiryMinutes()),
+                User = userDto,
+                RequiresTwoFactor = false
+            };
         }
 
-        /// <summary>
-        /// Authenticate user and return JWT tokens
-        /// </summary>
-        [HttpPost("login")]
-        public async Task<ActionResult<LoginResponseDto>> Login([FromBody] LoginDto loginDto)
+        public async Task<LoginResponseDto> RefreshTokenAsync(RefreshTokenDto refreshTokenDto)
+        {
+            var session = await _sessionRepository.FirstOrDefaultAsync(s =>
+                s.RefreshToken == refreshTokenDto.RefreshToken &&
+                !s.IsRevoked &&
+                s.ExpiresAt > DateTime.UtcNow) ?? throw new UnauthorizedAccessException("Invalid refresh token");
+
+            var user = await _userRepository.GetByIdAsync(session.UserId);
+            if (user == null || !user.IsActive)
+            {
+                throw new UnauthorizedAccessException("User not found or inactive");
+            }
+
+            // Generate new tokens
+            var accessToken = GenerateAccessToken(user);
+            var newRefreshToken = GenerateRefreshToken();
+
+            // Update session
+            session.RefreshToken = newRefreshToken;
+            session.ExpiresAt = DateTime.UtcNow.AddDays(GetRefreshTokenExpiryDays());
+            _sessionRepository.Update(session);
+            await _sessionRepository.SaveChangesAsync();
+
+            var userDto = _mapper.Map<UserDto>(user);
+
+            return new LoginResponseDto
+            {
+                AccessToken = accessToken,
+                RefreshToken = newRefreshToken,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(GetAccessTokenExpiryMinutes()),
+                User = userDto
+            };
+        }
+
+        public async Task<bool> LogoutAsync(string refreshToken)
+        {
+            var session = await _sessionRepository.FirstOrDefaultAsync(s => s.RefreshToken == refreshToken);
+            if (session != null)
+            {
+                session.IsRevoked = true;
+                _sessionRepository.Update(session);
+                await _sessionRepository.SaveChangesAsync();
+                return true;
+            }
+            return false;
+        }
+
+        public async Task<bool> RevokeAllSessionsAsync(Guid userId)
+        {
+            var sessions = await _sessionRepository.FindAsync(s => s.UserId == userId && !s.IsRevoked);
+            foreach (var session in sessions)
+            {
+                session.IsRevoked = true;
+                _sessionRepository.Update(session);
+            }
+            await _sessionRepository.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> ValidateTokenAsync(string token)
         {
             try
             {
-                var result = await _authService.LoginAsync(loginDto);
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var key = Encoding.UTF8.GetBytes(GetJwtSecretKey());
 
-                if (result.RequiresTwoFactor)
+                tokenHandler.ValidateToken(token, new TokenValidationParameters
                 {
-                    return Ok(new { RequiresTwoFactor = true, Message = "Two-factor authentication required" });
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ValidateIssuer = true,
+                    ValidIssuer = GetJwtIssuer(),
+                    ValidateAudience = true,
+                    ValidAudience = GetJwtAudience(),
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.Zero
+                }, out SecurityToken validatedToken);
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task<UserDto> GetCurrentUserAsync()
+        {
+            try
+            {
+                var userId = GetCurrentUserId();
+                var user = await _userRepository.GetByIdAsync(userId);
+
+                if (user == null)
+                {
+                    throw new UnauthorizedAccessException("User not found");
                 }
 
-                return Ok(result);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                _logger.LogWarning("Login failed for {Email}: {Message}", loginDto.Email, ex.Message);
-                return Unauthorized(new { Message = "Invalid credentials" });
-            }
-            catch (ArgumentException ex)
-            {
-                _logger.LogWarning("Login validation failed for {Email}: {Message}", loginDto.Email, ex.Message);
-                return BadRequest(new { Message = ex.Message });
+                return _mapper.Map<UserDto>(user);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during login for {Email}", loginDto.Email);
-                return StatusCode(500, new { Message = "An error occurred during login" });
+                throw new UnauthorizedAccessException($"Failed to get current user: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Refresh access token using refresh token
-        /// </summary>
-        [HttpPost("refresh")]
-        public async Task<ActionResult<LoginResponseDto>> RefreshToken([FromBody] RefreshTokenDto refreshTokenDto)
+        public async Task<bool> ForgotPasswordAsync(string email)
         {
-            try
+            var user = await _userRepository.GetByEmailAsync(email);
+            if (user == null)
             {
-                var result = await _authService.RefreshTokenAsync(refreshTokenDto);
-                return Ok(result);
+                return true; // Don't reveal if email exists
             }
-            catch (UnauthorizedAccessException ex)
+
+            // Invalidate any existing password reset tokens for this user
+            var existingTokens = await _passwordResetRepository.FindAsync(t => t.UserId == user.Id && !t.IsUsed);
+            foreach (var existingToken in existingTokens)
             {
-                _logger.LogWarning("Token refresh failed: {Message}", ex.Message);
-                return Unauthorized(new { Message = "Invalid refresh token" });
+                existingToken.IsUsed = true;
+                existingToken.UsedAt = DateTime.UtcNow;
+                _passwordResetRepository.Update(existingToken);
             }
-            catch (Exception ex)
+
+            // Generate new reset token
+            var resetToken = GenerateSecureToken();
+            var passwordResetToken = new PasswordResetToken
             {
-                _logger.LogError(ex, "Error during token refresh");
-                return StatusCode(500, new { Message = "An error occurred during token refresh" });
-            }
+                UserId = user.Id,
+                Token = resetToken,
+                ExpiresAt = DateTime.UtcNow.AddHours(24),
+                IsUsed = false,
+                IpAddress = GetClientIpAddress(),
+                UserAgent = GetUserAgent()
+            };
+
+            await _passwordResetRepository.AddAsync(passwordResetToken);
+            await _passwordResetRepository.SaveChangesAsync();
+
+            // Send password reset email
+            var resetUrl = _configuration["AppSettings:FrontendUrl"] + "/reset-password";
+            await _emailService.SendPasswordResetEmailAsync(user.Email, resetToken, resetUrl);
+
+            return true;
         }
 
-        /// <summary>
-        /// Logout user and revoke refresh token
-        /// </summary>
-        [HttpPost("logout")]
-        [Authorize]
-        public async Task<ActionResult> Logout([FromBody] RefreshTokenDto refreshTokenDto)
+        public async Task<bool> ResetPasswordAsync(string token, string newPassword)
         {
-            try
+            var passwordResetToken = await _passwordResetRepository.FirstOrDefaultAsync(t =>
+                t.Token == token &&
+                !t.IsUsed &&
+                t.ExpiresAt > DateTime.UtcNow);
+
+            if (passwordResetToken == null)
             {
-                await _authService.LogoutAsync(refreshTokenDto.RefreshToken);
-                return Ok(new { Message = "Logged out successfully" });
+                return false;
             }
-            catch (Exception ex)
+
+            var user = await _userRepository.GetByIdAsync(passwordResetToken.UserId);
+            if (user == null)
             {
-                _logger.LogError(ex, "Error during logout");
-                return StatusCode(500, new { Message = "An error occurred during logout" });
+                return false;
             }
+
+            // Update password
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
+            user.PasswordChangedAt = DateTime.UtcNow;
+            user.FailedLoginAttempts = 0;
+            user.IsLocked = false;
+            user.LockoutEnd = null;
+
+            // Mark token as used
+            passwordResetToken.IsUsed = true;
+            passwordResetToken.UsedAt = DateTime.UtcNow;
+
+            _userRepository.Update(user);
+            _passwordResetRepository.Update(passwordResetToken);
+            await _passwordResetRepository.SaveChangesAsync();
+
+            // Revoke all existing sessions
+            await RevokeAllSessionsAsync(user.Id);
+
+            // Send confirmation email
+            await _emailService.SendPasswordChangedEmailAsync(user.Email, user.FirstName);
+
+            return true;
         }
 
-        /// <summary>
-        /// Get current authenticated user information
-        /// </summary>
-        [HttpGet("me")]
-        [Authorize]
-        public async Task<ActionResult<UserDto>> GetCurrentUser()
+        public async Task<bool> Enable2FAAsync(Guid userId)
         {
-            try
-            {
-                var user = await _authService.GetCurrentUserAsync();
-                return Ok(user);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting current user");
-                return StatusCode(500, new { Message = "An error occurred while retrieving user information" });
-            }
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user == null) return false;
+
+            user.TwoFactorEnabled = true;
+            _userRepository.Update(user);
+            await _userRepository.SaveChangesAsync();
+
+            // Send confirmation email
+            await _emailService.Send2FAEnabledEmailAsync(user.Email, user.FirstName);
+
+            return true;
         }
 
-        /// <summary>
-        /// Initiate password reset process
-        /// </summary>
-        [HttpPost("forgot-password")]
-        public async Task<ActionResult> ForgotPassword([FromBody] ForgotPasswordDto forgotPasswordDto)
+        public async Task<bool> Disable2FAAsync(Guid userId)
         {
-            try
-            {
-                await _authService.ForgotPasswordAsync(forgotPasswordDto.Email);
-                return Ok(new { Message = "If the email exists, a password reset link has been sent" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during forgot password for {Email}", forgotPasswordDto.Email);
-                return StatusCode(500, new { Message = "An error occurred while processing the request" });
-            }
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user == null) return false;
+
+            user.TwoFactorEnabled = false;
+            user.TwoFactorSecret = null;
+            user.RecoveryCodes.Clear();
+            _userRepository.Update(user);
+            await _userRepository.SaveChangesAsync();
+            return true;
         }
 
-        /// <summary>
-        /// Reset password using reset token
-        /// </summary>
-        [HttpPost("reset-password")]
-        public async Task<ActionResult> ResetPassword([FromBody] ResetPasswordDto resetPasswordDto)
+        public async Task<string> Generate2FASecretAsync(Guid userId)
         {
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user == null) throw new ArgumentException("User not found");
+
+            var secret = Base32Encoding.ToString(KeyGeneration.GenerateRandomKey(20));
+            user.TwoFactorSecret = secret;
+            _userRepository.Update(user);
+            await _userRepository.SaveChangesAsync();
+
+            return secret;
+        }
+
+        public async Task<bool> Verify2FACodeAsync(Guid userId, string code)
+        {
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user == null || string.IsNullOrEmpty(user.TwoFactorSecret))
+                return false;
+
             try
             {
-                var success = await _authService.ResetPasswordAsync(resetPasswordDto.Token, resetPasswordDto.NewPassword);
+                var secretBytes = Base32Encoding.ToBytes(user.TwoFactorSecret);
+                var totp = new Totp(secretBytes);
 
-                if (!success)
+                // Verify current window and one window before/after for clock drift
+                var currentTime = DateTime.UtcNow;
+                var verificationWindow = TimeSpan.FromSeconds(30);
+
+                for (int i = -1; i <= 1; i++)
                 {
-                    return BadRequest(new { Message = "Invalid or expired reset token" });
+                    var timeToCheck = currentTime.AddSeconds(i * 30);
+                    var expectedCode = totp.ComputeTotp(timeToCheck);
+                    if (expectedCode == code)
+                    {
+                        return true;
+                    }
                 }
 
-                return Ok(new { Message = "Password reset successfully" });
+                return false;
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Error during password reset");
-                return StatusCode(500, new { Message = "An error occurred while resetting the password" });
+                return false;
             }
         }
 
-        /// <summary>
-        /// Enable two-factor authentication
-        /// </summary>
-        [HttpPost("enable-2fa")]
-        [Authorize]
-        public async Task<ActionResult<Enable2FAResponseDto>> Enable2FA()
+        public async Task<List<string>> GenerateRecoveryCodesAsync(Guid userId)
         {
-            try
-            {
-                var userId = GetCurrentUserId();
-                var secret = await _authService.Generate2FASecretAsync(userId);
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user == null) throw new ArgumentException("User not found");
 
-                return Ok(new Enable2FAResponseDto
-                {
-                    Secret = secret,
-                    QrCodeUrl = GenerateQrCodeUrl(secret)
-                });
-            }
-            catch (Exception ex)
+            var recoveryCodes = new List<string>();
+            for (int i = 0; i < 10; i++)
             {
-                _logger.LogError(ex, "Error enabling 2FA");
-                return StatusCode(500, new { Message = "An error occurred while enabling 2FA" });
+                recoveryCodes.Add(GenerateRecoveryCode());
             }
+
+            user.RecoveryCodes = recoveryCodes;
+            _userRepository.Update(user);
+            await _userRepository.SaveChangesAsync();
+
+            return recoveryCodes;
         }
 
-        /// <summary>
-        /// Verify and complete 2FA setup
-        /// </summary>
-        [HttpPost("verify-2fa")]
-        [Authorize]
-        public async Task<ActionResult<List<string>>> Verify2FA([FromBody] Verify2FADto verify2FADto)
+        public async Task<bool> UseRecoveryCodeAsync(Guid userId, string code)
         {
-            try
-            {
-                var userId = GetCurrentUserId();
-                var isValid = await _authService.Verify2FACodeAsync(userId, verify2FADto.Code);
+            var user = await _userRepository.GetByIdAsync(userId);
+            if (user == null || !user.RecoveryCodes.Contains(code))
+                return false;
 
-                if (!isValid)
-                {
-                    return BadRequest(new { Message = "Invalid verification code" });
-                }
+            user.RecoveryCodes.Remove(code);
+            _userRepository.Update(user);
+            await _userRepository.SaveChangesAsync();
 
-                await _authService.Enable2FAAsync(userId);
-                var recoveryCodes = await _authService.GenerateRecoveryCodesAsync(userId);
-
-                return Ok(recoveryCodes);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error verifying 2FA");
-                return StatusCode(500, new { Message = "An error occurred while verifying 2FA" });
-            }
+            return true;
         }
 
-        /// <summary>
-        /// Disable two-factor authentication
-        /// </summary>
-        [HttpPost("disable-2fa")]
-        [Authorize]
-        public async Task<ActionResult> Disable2FA()
+        private string GenerateAccessToken(User user)
         {
-            try
-            {
-                var userId = GetCurrentUserId();
-                await _authService.Disable2FAAsync(userId);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.UTF8.GetBytes(GetJwtSecretKey());
 
-                return Ok(new { Message = "Two-factor authentication disabled successfully" });
-            }
-            catch (Exception ex)
+            var claims = new List<Claim>
             {
-                _logger.LogError(ex, "Error disabling 2FA");
-                return StatusCode(500, new { Message = "An error occurred while disabling 2FA" });
-            }
+                new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new(JwtRegisteredClaimNames.Email, user.Email),
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new(JwtRegisteredClaimNames.Iat,
+                    new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds().ToString(),
+                    ClaimValueTypes.Integer64),
+                new("userId", user.Id.ToString()),
+                new("firstName", user.FirstName),
+                new("lastName", user.LastName),
+                new(ClaimTypes.Role, user.Role.ToString()),
+                new("role", user.Role.ToString()),
+                new("isAdmin", user.IsAdmin.ToString()),
+                new("isCustomer", user.IsCustomer.ToString())
+            };
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddMinutes(GetAccessTokenExpiryMinutes()),
+                Issuer = GetJwtIssuer(),
+                Audience = GetJwtAudience(),
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
         }
 
-        /// <summary>
-        /// Revoke all user sessions
-        /// </summary>
-        [HttpPost("revoke-all-sessions")]
-        [Authorize]
-        public async Task<ActionResult> RevokeAllSessions()
+        private string GenerateRefreshToken()
         {
-            try
-            {
-                var userId = GetCurrentUserId();
-                await _authService.RevokeAllSessionsAsync(userId);
+            var randomNumber = new byte[64];
+            using var rng = RandomNumberGenerator.Create();
+            rng.GetBytes(randomNumber);
+            return Convert.ToBase64String(randomNumber);
+        }
 
-                return Ok(new { Message = "All sessions revoked successfully" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error revoking all sessions");
-                return StatusCode(500, new { Message = "An error occurred while revoking sessions" });
-            }
+        private string GenerateSecureToken()
+        {
+            var randomNumber = new byte[32];
+            using var rng = RandomNumberGenerator.Create();
+            rng.GetBytes(randomNumber);
+            return Convert.ToBase64String(randomNumber);
+        }
+
+        private string GenerateRecoveryCode()
+        {
+            var random = new Random();
+            return $"{random.Next(1000, 9999)}-{random.Next(1000, 9999)}";
         }
 
         private Guid GetCurrentUserId()
         {
-            var userIdClaim = User.FindFirst("sub") ?? User.FindFirst("userId");
-            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext?.User?.Identity?.IsAuthenticated != true)
             {
-                throw new UnauthorizedAccessException("Invalid user token");
+                throw new UnauthorizedAccessException("User is not authenticated");
             }
+
+            // Try different claim types
+            var userIdClaim = httpContext.User.FindFirst("sub") ??
+                             httpContext.User.FindFirst("userId") ??
+                             httpContext.User.FindFirst(ClaimTypes.NameIdentifier);
+
+            if (userIdClaim == null)
+            {
+                var allClaims = string.Join(", ", httpContext.User.Claims.Select(c => $"{c.Type}:{c.Value}"));
+                throw new UnauthorizedAccessException($"User ID claim not found. Available claims: {allClaims}");
+            }
+
+            if (!Guid.TryParse(userIdClaim.Value, out var userId))
+            {
+                throw new UnauthorizedAccessException($"Invalid user ID format: {userIdClaim.Value}");
+            }
+
             return userId;
         }
-        [HttpGet("test")]
-        public IActionResult Test()
+
+        private string GetClientIpAddress()
         {
-            Console.WriteLine("=== TEST ENDPOINT HIT ===");
-            return Ok(new { Message = "AuthController is working", Timestamp = DateTime.Now });
+            var ipAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+
+            // Check for forwarded IP (load balancer, proxy)
+            var forwardedFor = _httpContextAccessor.HttpContext?.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(forwardedFor))
+            {
+                ipAddress = forwardedFor.Split(',').FirstOrDefault()?.Trim();
+            }
+
+            return ipAddress ?? "Unknown";
         }
-    
-        private string GenerateQrCodeUrl(string secret)
+
+        private string GetUserAgent()
         {
-            // Generate QR code URL for 2FA apps like Google Authenticator
-            var issuer = "Backend CMS";
-            var user = User.FindFirst("email")?.Value ?? "user";
-            return $"otpauth://totp/{issuer}:{user}?secret={secret}&issuer={issuer}";
+            return _httpContextAccessor.HttpContext?.Request.Headers["User-Agent"].ToString() ?? "Unknown";
         }
+
+        private string GetJwtSecretKey() => _configuration["JwtSettings:SecretKey"]!;
+        private string GetJwtIssuer() => _configuration["JwtSettings:Issuer"]!;
+        private string GetJwtAudience() => _configuration["JwtSettings:Audience"]!;
+        private int GetAccessTokenExpiryMinutes() => int.Parse(_configuration["JwtSettings:ExpiryInMinutes"]!);
+        private int GetRefreshTokenExpiryDays() => int.Parse(_configuration["JwtSettings:RefreshTokenExpiryInDays"]!);
     }
-
-    //public class ForgotPasswordDto
-    //{
-    //    public string Email { get; set; } = string.Empty;
-    //}
-
-    //public class ResetPasswordDto
-    //{
-    //    public string Token { get; set; } = string.Empty;
-    //    public string NewPassword { get; set; } = string.Empty;
-    //}
-
-    //public class Enable2FAResponseDto
-    //{
-    //    public string Secret { get; set; } = string.Empty;
-    //    public string QrCodeUrl { get; set; } = string.Empty;
-    //}
-
-    //public class Verify2FADto
-    //{
-    //    public string Code { get; set; } = string.Empty;
-    //}
-    //public class RegisterDto
-    //{
-    //    public string Email { get; set; } = string.Empty;
-    //    public string Username { get; set; } = string.Empty;
-    //    public string Password { get; set; } = string.Empty;
-    //    public string FirstName { get; set; } = string.Empty;
-    //    public string LastName { get; set; } = string.Empty;
-    //}
 }

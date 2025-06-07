@@ -1,13 +1,10 @@
-﻿// File: Backend.CMS.Infrastructure/Mapping/MappingProfile.cs
-using AutoMapper;
+﻿using AutoMapper;
 using Backend.CMS.Application.DTOs.Companies;
 using Backend.CMS.Application.DTOs.Components;
 using Backend.CMS.Application.DTOs.Pages;
 using Backend.CMS.Application.DTOs.Users;
 using Backend.CMS.Application.Interfaces.Services;
 using Backend.CMS.Domain.Entities;
-using System.Data;
-using System.Security;
 
 namespace Backend.CMS.Infrastructure.Mapping
 {
@@ -17,47 +14,43 @@ namespace Backend.CMS.Infrastructure.Mapping
         {
             // User mappings
             CreateMap<User, UserDto>()
-            .ForMember(dest => dest.Roles, opt => opt.MapFrom(src =>
-            src.UserRoles
-            .Where(ur => ur.IsActive)
-            .Select(ur => ur.Role)
-            .ToList()));
+                .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => src.FullName))
+                .ForMember(dest => dest.RoleDisplayName, opt => opt.MapFrom(src => src.RoleDisplayName))
+                .ForMember(dest => dest.IsAdmin, opt => opt.MapFrom(src => src.IsAdmin))
+                .ForMember(dest => dest.IsCustomer, opt => opt.MapFrom(src => src.IsCustomer));
+
             CreateMap<User, UserListDto>()
-                .ForMember(dest => dest.RoleNames, opt => opt.MapFrom(src =>
-                    src.UserRoles
-                        .Where(ur => ur.IsActive)
-                        .Select(ur => ur.Role.Name)
-                        .ToList()));
+                .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => src.FullName))
+                .ForMember(dest => dest.RoleDisplayName, opt => opt.MapFrom(src => src.RoleDisplayName))
+                .ForMember(dest => dest.IsAdmin, opt => opt.MapFrom(src => src.IsAdmin));
 
             CreateMap<CreateUserDto, User>()
                 .ForMember(dest => dest.PasswordHash, opt => opt.MapFrom(src => BCrypt.Net.BCrypt.HashPassword(src.Password)))
-                .ForMember(dest => dest.UserRoles, opt => opt.Ignore()) 
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
                 .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore());
 
             CreateMap<UpdateUserDto, User>()
-                .ForMember(dest => dest.UserRoles, opt => opt.Ignore()) // Ignore navigation property
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
-                .ForMember(dest => dest.PasswordHash, opt => opt.Ignore()) // Don't update password hash via update
-                .ForMember(dest => dest.TenantId, opt => opt.Ignore());
-
-            // Role mappings
-            CreateMap<Role, RoleDto>()
-                            .ForMember(dest => dest.Permissions, opt => opt.MapFrom(src =>
-                                src.RolePermissions.Select(rp => rp.Permission).ToList()));
-            // Permission mappings
-            CreateMap<Permission, PermissionDto>();
+                .ForMember(dest => dest.PasswordHash, opt => opt.Ignore());
 
             // Page mappings
             CreateMap<Page, PageDto>()
                 .ForMember(dest => dest.Components, opt => opt.MapFrom(src => src.Components.Where(c => !c.IsDeleted && c.ParentComponentId == null).OrderBy(c => c.Order)))
-                .ForMember(dest => dest.ChildPages, opt => opt.MapFrom(src => src.ChildPages.Where(cp => !cp.IsDeleted).OrderBy(cp => cp.Priority).ThenBy(cp => cp.Name)));
+                .ForMember(dest => dest.ChildPages, opt => opt.MapFrom(src => src.ChildPages.Where(cp => !cp.IsDeleted).OrderBy(cp => cp.Priority).ThenBy(cp => cp.Name)))
+                .ForMember(dest => dest.IsPublic, opt => opt.MapFrom(src => src.IsPublic))
+                .ForMember(dest => dest.RequiresLogin, opt => opt.MapFrom(src => src.RequiresLogin))
+                .ForMember(dest => dest.RequiresAdmin, opt => opt.MapFrom(src => src.RequiresAdmin))
+                .ForMember(dest => dest.IsPublished, opt => opt.MapFrom(src => src.IsPublished));
 
             CreateMap<Page, PageListDto>()
-                .ForMember(dest => dest.HasChildren, opt => opt.MapFrom(src => src.ChildPages.Any(cp => !cp.IsDeleted)));
+                .ForMember(dest => dest.HasChildren, opt => opt.MapFrom(src => src.ChildPages.Any(cp => !cp.IsDeleted)))
+                .ForMember(dest => dest.IsPublic, opt => opt.MapFrom(src => src.IsPublic))
+                .ForMember(dest => dest.RequiresLogin, opt => opt.MapFrom(src => src.RequiresLogin))
+                .ForMember(dest => dest.RequiresAdmin, opt => opt.MapFrom(src => src.RequiresAdmin))
+                .ForMember(dest => dest.IsPublished, opt => opt.MapFrom(src => src.IsPublished));
 
             CreateMap<CreatePageDto, Page>()
                 .ForMember(dest => dest.Components, opt => opt.Ignore())
@@ -97,8 +90,7 @@ namespace Backend.CMS.Infrastructure.Mapping
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
-                .ForMember(dest => dest.Locations, opt => opt.Ignore())
-                .ForMember(dest => dest.TenantId, opt => opt.Ignore());
+                .ForMember(dest => dest.Locations, opt => opt.Ignore());
 
             // Location mappings
             CreateMap<Location, LocationDto>()
@@ -114,7 +106,6 @@ namespace Backend.CMS.Infrastructure.Mapping
                 .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
                 .ForMember(dest => dest.Company, opt => opt.Ignore())
                 .ForMember(dest => dest.CompanyId, opt => opt.Ignore())
-                .ForMember(dest => dest.TenantId, opt => opt.Ignore())
                 .ForMember(dest => dest.OpeningHours, opt => opt.Ignore());
 
             // LocationOpeningHour mappings
@@ -123,7 +114,7 @@ namespace Backend.CMS.Infrastructure.Mapping
                 .ForMember(dest => dest.Location, opt => opt.Ignore())
                 .ForMember(dest => dest.LocationId, opt => opt.Ignore());
 
-            // ComponentTemplate mappings (Using Components namespace to avoid ambiguity)
+            // ComponentTemplate mappings
             CreateMap<ComponentTemplate, ComponentTemplateDto>();
 
             CreateMap<CreateComponentTemplateDto, ComponentTemplate>()
@@ -133,7 +124,6 @@ namespace Backend.CMS.Infrastructure.Mapping
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
-                .ForMember(dest => dest.TenantId, opt => opt.Ignore())
                 .ForMember(dest => dest.IsSystemTemplate, opt => opt.Ignore());
         }
     }

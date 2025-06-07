@@ -19,12 +19,12 @@ namespace Backend.CMS.Domain.Entities
         public Dictionary<string, object> ImpactAnalysis { get; set; } = new();
         public bool RequiresMaintenanceWindow { get; set; }
         public int EstimatedDurationMinutes { get; set; }
-        public string RiskLevel { get; set; } = "Medium"; // Low, Medium, High, Critical
+        public string RiskLevel { get; set; } = "Medium";
         public List<string> PrerequisiteChecks { get; set; } = new();
         public Dictionary<string, object> RollbackPlan { get; set; } = new();
         public bool HasBreakingChanges { get; set; }
         public DateTime? ScheduledDeploymentTime { get; set; }
-        public string? ApprovedJobId { get; set; } // Links to actual deployment job
+        public string? ApprovedJobId { get; set; }
     }
 
     public class TemplateUpdateProposal : BaseEntity
