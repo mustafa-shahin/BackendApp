@@ -1,4 +1,5 @@
-﻿using Backend.CMS.Domain.Common;
+﻿// User.cs - Updated User Entity
+using Backend.CMS.Domain.Common;
 using Backend.CMS.Domain.Common.Interfaces;
 using System;
 using System.Collections.Generic;
@@ -16,12 +17,15 @@ namespace Backend.CMS.Domain.Entities
         public bool IsActive { get; set; } = true;
         public bool IsLocked { get; set; }
         public DateTime? LastLoginAt { get; set; }
-        public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
+
+        // Navigation property - NOT a database column
+        public ICollection<UserRole> UserRoles { get; set; } = [];
+
         public int FailedLoginAttempts { get; set; }
         public DateTime? LockoutEnd { get; set; }
         public bool TwoFactorEnabled { get; set; }
         public string? TwoFactorSecret { get; set; }
-        public List<string> RecoveryCodes { get; set; } = new();
+        public List<string> RecoveryCodes { get; set; } = [];
 
         // Profile enhancements
         public string? Avatar { get; set; }
@@ -46,11 +50,11 @@ namespace Backend.CMS.Domain.Entities
         public DateTime? DateOfBirth { get; set; }
         public string? Gender { get; set; }
 
-        // Preferences
-        public Dictionary<string, object> Preferences { get; set; } = new();
+        // Preferences stored as JSON
+        public Dictionary<string, object> Preferences { get; set; } = [];
 
         // Navigation properties
-        public ICollection<UserSession> Sessions { get; set; } = new List<UserSession>();
-        public ICollection<PasswordResetToken> PasswordResetTokens { get; set; } = new List<PasswordResetToken>();
+        public ICollection<UserSession> Sessions { get; set; } = [];
+        public ICollection<PasswordResetToken> PasswordResetTokens { get; set; } = [];
     }
 }

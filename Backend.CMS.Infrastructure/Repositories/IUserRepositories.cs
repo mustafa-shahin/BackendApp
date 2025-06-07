@@ -11,6 +11,10 @@ namespace Backend.CMS.Infrastructure.Repositories
         Task<User?> GetByUsernameAsync(string username);
         Task<User?> GetWithRolesAsync(Guid userId);
         Task<User?> GetWithRolesAndPermissionsAsync(Guid userId);
+
+        // ADD THIS METHOD
+        Task<User?> GetByEmailWithRolesAsync(string email);
+
         Task<IEnumerable<User>> SearchUsersAsync(string searchTerm, int page, int pageSize);
         Task<bool> EmailExistsAsync(string email, Guid? excludeUserId = null);
         Task<bool> UsernameExistsAsync(string username, Guid? excludeUserId = null);
@@ -28,6 +32,15 @@ namespace Backend.CMS.Infrastructure.Repositories
         public async Task<User?> GetByEmailAsync(string email)
         {
             return await _dbSet
+                .FirstOrDefaultAsync(u => u.Email == email && !u.IsDeleted);
+        }
+
+        // ADD THIS IMPLEMENTATION
+        public async Task<User?> GetByEmailWithRolesAsync(string email)
+        {
+            return await _dbSet
+                .Include(u => u.UserRoles.Where(ur => ur.IsActive))
+                    .ThenInclude(ur => ur.Role)
                 .FirstOrDefaultAsync(u => u.Email == email && !u.IsDeleted);
         }
 

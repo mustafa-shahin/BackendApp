@@ -70,7 +70,7 @@ namespace Backend.CMS.Infrastructure.Services
                 if (await _userRepository.UsernameExistsAsync(createUserDto.Username))
                     throw new ArgumentException("Username already exists");
 
-                // Create user entity
+                // Create user entity - AutoMapper will handle most properties
                 var user = _mapper.Map<User>(createUserDto);
                 user.Id = Guid.NewGuid();
                 user.CreatedAt = DateTime.UtcNow;
@@ -78,12 +78,13 @@ namespace Backend.CMS.Infrastructure.Services
                 user.IsActive = true;
                 user.IsLocked = false;
                 user.FailedLoginAttempts = 0;
+                // Don't set UserRoles here - it's a navigation property
 
                 await _userRepository.AddAsync(user);
                 await _userRepository.SaveChangesAsync();
 
-                // Assign default roles if specified
-                if (createUserDto.RoleIds?.Any() == true)
+                // Assign roles separately using the UserRole junction table
+                if (createUserDto.RoleIds?.Count > 0)
                 {
                     await AssignRolesToUserAsync(user.Id, createUserDto.RoleIds);
                 }

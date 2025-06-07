@@ -46,7 +46,8 @@ namespace Backend.CMS.Infrastructure.Services
 
         public async Task<LoginResponseDto> LoginAsync(LoginDto loginDto)
         {
-            var user = await _userRepository.GetByEmailAsync(loginDto.Email);
+            // USE THE NEW METHOD THAT LOADS ROLES BY EMAIL
+            var user = await _userRepository.GetByEmailWithRolesAsync(loginDto.Email);
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
             {
@@ -116,7 +117,7 @@ namespace Backend.CMS.Infrastructure.Services
             user.LastLoginAt = DateTime.UtcNow;
             _userRepository.Update(user);
 
-            // Generate tokens
+            // Generate tokens - NOW user.UserRoles should be loaded with data
             var accessToken = GenerateAccessToken(user);
             var refreshToken = GenerateRefreshToken();
 
@@ -463,8 +464,11 @@ namespace Backend.CMS.Infrastructure.Services
             {
                 foreach (var userRole in user.UserRoles.Where(ur => ur.IsActive))
                 {
-                    claims.Add(new Claim(ClaimTypes.Role, userRole.Role.Name));
-                    claims.Add(new Claim("role", userRole.Role.Name)); // Add both formats
+                    if (userRole.Role != null)
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, userRole.Role.Name));
+                        claims.Add(new Claim("role", userRole.Role.Name));
+                    }
                 }
             }
 

@@ -17,25 +17,37 @@ namespace Backend.CMS.Infrastructure.Mapping
         {
             // User mappings
             CreateMap<User, UserDto>()
-                .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.UserRoles.Where(ur => ur.IsActive).Select(ur => ur.Role)));
-
+            .ForMember(dest => dest.Roles, opt => opt.MapFrom(src =>
+            src.UserRoles
+            .Where(ur => ur.IsActive)
+            .Select(ur => ur.Role)
+            .ToList()));
             CreateMap<User, UserListDto>()
-                .ForMember(dest => dest.RoleNames, opt => opt.MapFrom(src => src.UserRoles.Where(ur => ur.IsActive).Select(ur => ur.Role.Name).ToList()));
+                .ForMember(dest => dest.RoleNames, opt => opt.MapFrom(src =>
+                    src.UserRoles
+                        .Where(ur => ur.IsActive)
+                        .Select(ur => ur.Role.Name)
+                        .ToList()));
 
             CreateMap<CreateUserDto, User>()
                 .ForMember(dest => dest.PasswordHash, opt => opt.MapFrom(src => BCrypt.Net.BCrypt.HashPassword(src.Password)))
-                .ForMember(dest => dest.UserRoles, opt => opt.Ignore());
-
-            CreateMap<UpdateUserDto, User>()
-                .ForMember(dest => dest.UserRoles, opt => opt.Ignore())
+                .ForMember(dest => dest.UserRoles, opt => opt.Ignore()) 
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
                 .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
-                .ForMember(dest => dest.CreatedBy, opt => opt.Ignore());
+                .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore());
+
+            CreateMap<UpdateUserDto, User>()
+                .ForMember(dest => dest.UserRoles, opt => opt.Ignore()) // Ignore navigation property
+                .ForMember(dest => dest.Id, opt => opt.Ignore())
+                .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
+                .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
+                .ForMember(dest => dest.PasswordHash, opt => opt.Ignore()) // Don't update password hash via update
+                .ForMember(dest => dest.TenantId, opt => opt.Ignore());
 
             // Role mappings
             CreateMap<Role, RoleDto>()
-                .ForMember(dest => dest.Permissions, opt => opt.MapFrom(src => src.RolePermissions.Select(rp => rp.Permission)));
-
+                            .ForMember(dest => dest.Permissions, opt => opt.MapFrom(src =>
+                                src.RolePermissions.Select(rp => rp.Permission).ToList()));
             // Permission mappings
             CreateMap<Permission, PermissionDto>();
 
