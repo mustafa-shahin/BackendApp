@@ -1,11 +1,13 @@
 ﻿using Backend.CMS.Domain.Common;
+using Backend.CMS.Domain.Common.Interfaces;
 using System;
 using System.Collections.Generic;
 
 namespace Backend.CMS.Domain.Entities
 {
-    public class Location : BaseEntity
+    public class Location : BaseEntity, ITenantEntity
     {
+        public string TenantId { get; set; } = string.Empty;
         public Guid CompanyId { get; set; }
         public Company Company { get; set; } = null!;
         public string Name { get; set; } = string.Empty;

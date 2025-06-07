@@ -1,21 +1,26 @@
-﻿using Backend.CMS.Domain.Common;
-using Backend.CMS.Domain.Enums;
+﻿// User.cs - Updated User Entity
+using Backend.CMS.Domain.Common;
+using Backend.CMS.Domain.Common.Interfaces;
 using System;
 using System.Collections.Generic;
 
 namespace Backend.CMS.Domain.Entities
 {
-    public class User : BaseEntity
+    public class User : BaseEntity, ITenantEntity
     {
+        public string TenantId { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string Username { get; set; } = string.Empty;
         public string PasswordHash { get; set; } = string.Empty;
         public string FirstName { get; set; } = string.Empty;
         public string LastName { get; set; } = string.Empty;
-        public UserRole Role { get; set; } = UserRole.Customer;
         public bool IsActive { get; set; } = true;
         public bool IsLocked { get; set; }
         public DateTime? LastLoginAt { get; set; }
+
+        // Navigation property - NOT a database column
+        public ICollection<UserRole> UserRoles { get; set; } = [];
+
         public int FailedLoginAttempts { get; set; }
         public DateTime? LockoutEnd { get; set; }
         public bool TwoFactorEnabled { get; set; }
@@ -51,11 +56,5 @@ namespace Backend.CMS.Domain.Entities
         // Navigation properties
         public ICollection<UserSession> Sessions { get; set; } = [];
         public ICollection<PasswordResetToken> PasswordResetTokens { get; set; } = [];
-
-        // Helper properties
-        public bool IsAdmin => Role == UserRole.Admin;
-        public bool IsCustomer => Role == UserRole.Customer;
-        public string FullName => $"{FirstName} {LastName}".Trim();
-        public string RoleDisplayName => Role.ToString();
     }
 }

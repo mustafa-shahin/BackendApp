@@ -1,12 +1,14 @@
-﻿using Backend.CMS.Domain.Enums;
-using System;
+﻿using System;
 using System.Collections.Generic;
+using Backend.CMS.Domain.Common;
+using Backend.CMS.Domain.Common.Interfaces;
+using Backend.CMS.Domain.Enums;
 
-namespace Backend.CMS.Application.DTOs.Pages
+namespace Backend.CMS.Domain.Entities
 {
-    public class PageDto
+    public class Page : BaseEntity, ITenantEntity
     {
-        public Guid Id { get; set; }
+        public string TenantId { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Slug { get; set; } = string.Empty;
@@ -15,107 +17,14 @@ namespace Backend.CMS.Application.DTOs.Pages
         public string? MetaDescription { get; set; }
         public string? MetaKeywords { get; set; }
         public PageStatus Status { get; set; }
-        public PageAccessLevel AccessLevel { get; set; }
         public string? Template { get; set; }
         public int? Priority { get; set; }
         public Guid? ParentPageId { get; set; }
+        public Page? ParentPage { get; set; }
+        public ICollection<Page> ChildPages { get; set; } = new List<Page>();
+        public ICollection<PageComponent> Components { get; set; } = new List<PageComponent>();
+        public ICollection<PagePermission> Permissions { get; set; } = new List<PagePermission>();
         public DateTime? PublishedOn { get; set; }
         public string? PublishedBy { get; set; }
-        public DateTime CreatedAt { get; set; }
-        public DateTime UpdatedAt { get; set; }
-        public List<PageComponentDto> Components { get; set; } = new();
-        public List<PageDto> ChildPages { get; set; } = new();
-
-        // Helper properties
-        public bool IsPublic => AccessLevel == PageAccessLevel.Public;
-        public bool RequiresLogin => AccessLevel == PageAccessLevel.LoggedInOnly;
-        public bool RequiresAdmin => AccessLevel == PageAccessLevel.AdminOnly;
-        public bool IsPublished => Status == PageStatus.Published;
-    }
-
-    public class CreatePageDto
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Title { get; set; } = string.Empty;
-        public string Slug { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public string? MetaTitle { get; set; }
-        public string? MetaDescription { get; set; }
-        public string? MetaKeywords { get; set; }
-        public PageStatus Status { get; set; } = PageStatus.Draft;
-        public PageAccessLevel AccessLevel { get; set; } = PageAccessLevel.Public;
-        public string? Template { get; set; }
-        public int? Priority { get; set; }
-        public Guid? ParentPageId { get; set; }
-    }
-
-    public class UpdatePageDto
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Title { get; set; } = string.Empty;
-        public string Slug { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public string? MetaTitle { get; set; }
-        public string? MetaDescription { get; set; }
-        public string? MetaKeywords { get; set; }
-        public PageStatus Status { get; set; }
-        public PageAccessLevel AccessLevel { get; set; }
-        public string? Template { get; set; }
-        public int? Priority { get; set; }
-        public Guid? ParentPageId { get; set; }
-    }
-
-    public class PageComponentDto
-    {
-        public Guid Id { get; set; }
-        public ComponentType Type { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public Dictionary<string, object> Properties { get; set; } = new();
-        public Dictionary<string, object> Styles { get; set; } = new();
-        public Dictionary<string, object> Content { get; set; } = new();
-        public int Order { get; set; }
-        public Guid? ParentComponentId { get; set; }
-        public List<PageComponentDto> ChildComponents { get; set; } = new();
-        public bool IsVisible { get; set; } = true;
-        public string? CssClasses { get; set; }
-        public string? CustomCss { get; set; }
-        public Dictionary<string, object> ResponsiveSettings { get; set; } = new();
-        public Dictionary<string, object> AnimationSettings { get; set; } = new();
-        public Dictionary<string, object> InteractionSettings { get; set; } = new();
-    }
-
-    public class SavePageStructureDto
-    {
-        public Guid PageId { get; set; }
-        public List<PageComponentDto> Components { get; set; } = new();
-    }
-
-    public class PageListDto
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Title { get; set; } = string.Empty;
-        public string Slug { get; set; } = string.Empty;
-        public PageStatus Status { get; set; }
-        public PageAccessLevel AccessLevel { get; set; }
-        public DateTime CreatedAt { get; set; }
-        public DateTime UpdatedAt { get; set; }
-        public DateTime? PublishedOn { get; set; }
-        public bool HasChildren { get; set; }
-
-        // Helper properties
-        public bool IsPublic => AccessLevel == PageAccessLevel.Public;
-        public bool RequiresLogin => AccessLevel == PageAccessLevel.LoggedInOnly;
-        public bool RequiresAdmin => AccessLevel == PageAccessLevel.AdminOnly;
-        public bool IsPublished => Status == PageStatus.Published;
-    }
-
-    public class PageVersionDto
-    {
-        public Guid Id { get; set; }
-        public int VersionNumber { get; set; }
-        public string? ChangeNotes { get; set; }
-        public DateTime CreatedAt { get; set; }
-        public string CreatedBy { get; set; } = string.Empty;
     }
 }

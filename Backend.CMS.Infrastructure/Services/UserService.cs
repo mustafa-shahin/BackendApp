@@ -2,7 +2,6 @@
 using Backend.CMS.Application.DTOs.Users;
 using Backend.CMS.Application.Interfaces.Services;
 using Backend.CMS.Domain.Entities;
-using Backend.CMS.Domain.Enums;
 using Backend.CMS.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
 
@@ -11,22 +10,28 @@ namespace Backend.CMS.Infrastructure.Services
     public class UserService : IUserService
     {
         private readonly IUserRepository _userRepository;
+        private readonly IRepository<Role> _roleRepository;
+        private readonly IRepository<UserRole> _userRoleRepository;
         private readonly IMapper _mapper;
         private readonly ILogger<UserService> _logger;
 
         public UserService(
             IUserRepository userRepository,
+            IRepository<Role> roleRepository,
+            IRepository<UserRole> userRoleRepository,
             IMapper mapper,
             ILogger<UserService> logger)
         {
             _userRepository = userRepository;
+            _roleRepository = roleRepository;
+            _userRoleRepository = userRoleRepository;
             _mapper = mapper;
             _logger = logger;
         }
 
         public async Task<UserDto> GetUserByIdAsync(Guid userId)
         {
-            var user = await _userRepository.GetByIdAsync(userId);
+            var user = await _userRepository.GetWithRolesAsync(userId);
             return user == null ? throw new ArgumentException("User not found") : _mapper.Map<UserDto>(user);
         }
 
@@ -65,15 +70,7 @@ namespace Backend.CMS.Infrastructure.Services
                 if (await _userRepository.UsernameExistsAsync(createUserDto.Username))
                     throw new ArgumentException("Username already exists");
 
-                // Check if this is the first user - if so, make them admin
-                var existingUserCount = await _userRepository.CountAsync();
-                if (existingUserCount == 0)
-                {
-                    createUserDto.Role = UserRole.Admin;
-                    _logger.LogInformation("Creating first user as administrator: {Email}", createUserDto.Email);
-                }
-
-                // Create user entity
+                // Create user entity - AutoMapper will handle most properties
                 var user = _mapper.Map<User>(createUserDto);
                 user.Id = Guid.NewGuid();
                 user.CreatedAt = DateTime.UtcNow;
@@ -81,12 +78,27 @@ namespace Backend.CMS.Infrastructure.Services
                 user.IsActive = true;
                 user.IsLocked = false;
                 user.FailedLoginAttempts = 0;
+                // Don't set UserRoles here - it's a navigation property
 
                 await _userRepository.AddAsync(user);
                 await _userRepository.SaveChangesAsync();
 
-                _logger.LogInformation("User created successfully: {Email} with role {Role}", createUserDto.Email, user.Role);
-                return _mapper.Map<UserDto>(user);
+                // Assign roles separately using the UserRole junction table
+                if (createUserDto.RoleIds?.Count > 0)
+                {
+                    await AssignRolesToUserAsync(user.Id, createUserDto.RoleIds);
+                }
+                else
+                {
+                    // Assign default "Viewer" role if no roles specified
+                    await AssignDefaultRoleAsync(user.Id);
+                }
+
+                // Reload user with roles for response
+                var userWithRoles = await _userRepository.GetWithRolesAsync(user.Id);
+
+                _logger.LogInformation("User created successfully: {Email}", createUserDto.Email);
+                return _mapper.Map<UserDto>(userWithRoles);
             }
             catch (ArgumentException)
             {
@@ -115,33 +127,14 @@ namespace Backend.CMS.Infrastructure.Services
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
 
-            _logger.LogInformation("User updated: {Email} with role {Role}", user.Email, user.Role);
-            return _mapper.Map<UserDto>(user);
-        }
-
-        public async Task<UserDto> ChangeUserRoleAsync(Guid userId, ChangeUserRoleDto changeRoleDto)
-        {
-            var user = await _userRepository.GetByIdAsync(userId) ?? throw new ArgumentException("User not found");
-
-            // Prevent changing role if this is the last admin
-            if (user.Role == UserRole.Admin && changeRoleDto.Role != UserRole.Admin)
+            // Update roles if specified
+            if (updateUserDto.RoleIds?.Any() == true)
             {
-                var adminCount = await _userRepository.CountAsync(u => u.Role == UserRole.Admin && u.IsActive && !u.IsDeleted);
-                if (adminCount <= 1)
-                {
-                    throw new InvalidOperationException("Cannot remove admin role from the last administrator");
-                }
+                await UpdateUserRolesAsync(userId, updateUserDto.RoleIds);
             }
 
-            var oldRole = user.Role;
-            user.Role = changeRoleDto.Role;
-            user.UpdatedAt = DateTime.UtcNow;
-
-            _userRepository.Update(user);
-            await _userRepository.SaveChangesAsync();
-
-            _logger.LogInformation("User role changed: {Email} from {OldRole} to {NewRole}", user.Email, oldRole, user.Role);
-            return _mapper.Map<UserDto>(user);
+            var updatedUser = await _userRepository.GetWithRolesAsync(userId);
+            return _mapper.Map<UserDto>(updatedUser);
         }
 
         public async Task<bool> DeleteUserAsync(Guid userId)
@@ -150,16 +143,6 @@ namespace Backend.CMS.Infrastructure.Services
             if (user == null)
                 return false;
 
-            // Prevent deleting the last admin
-            if (user.Role == UserRole.Admin)
-            {
-                var adminCount = await _userRepository.CountAsync(u => u.Role == UserRole.Admin && u.IsActive && !u.IsDeleted);
-                if (adminCount <= 1)
-                {
-                    throw new InvalidOperationException("Cannot delete the last administrator");
-                }
-            }
-
             // Soft delete
             user.IsDeleted = true;
             user.DeletedAt = DateTime.UtcNow;
@@ -167,8 +150,6 @@ namespace Backend.CMS.Infrastructure.Services
 
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
-
-            _logger.LogInformation("User deleted: {Email}", user.Email);
             return true;
         }
 
@@ -182,8 +163,6 @@ namespace Backend.CMS.Infrastructure.Services
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
-
-            _logger.LogInformation("User activated: {Email}", user.Email);
             return true;
         }
 
@@ -193,22 +172,10 @@ namespace Backend.CMS.Infrastructure.Services
             if (user == null)
                 return false;
 
-            // Prevent deactivating the last admin
-            if (user.Role == UserRole.Admin)
-            {
-                var activeAdminCount = await _userRepository.CountAsync(u => u.Role == UserRole.Admin && u.IsActive && !u.IsDeleted);
-                if (activeAdminCount <= 1)
-                {
-                    throw new InvalidOperationException("Cannot deactivate the last administrator");
-                }
-            }
-
             user.IsActive = false;
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
-
-            _logger.LogInformation("User deactivated: {Email}", user.Email);
             return true;
         }
 
@@ -218,23 +185,11 @@ namespace Backend.CMS.Infrastructure.Services
             if (user == null)
                 return false;
 
-            // Prevent locking the last admin
-            if (user.Role == UserRole.Admin)
-            {
-                var unlockedAdminCount = await _userRepository.CountAsync(u => u.Role == UserRole.Admin && u.IsActive && !u.IsLocked && !u.IsDeleted);
-                if (unlockedAdminCount <= 1)
-                {
-                    throw new InvalidOperationException("Cannot lock the last administrator");
-                }
-            }
-
             user.IsLocked = true;
             user.LockoutEnd = DateTime.UtcNow.AddDays(30);
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
-
-            _logger.LogInformation("User locked: {Email}", user.Email);
             return true;
         }
 
@@ -250,8 +205,6 @@ namespace Backend.CMS.Infrastructure.Services
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
-
-            _logger.LogInformation("User unlocked: {Email}", user.Email);
             return true;
         }
 
@@ -269,8 +222,6 @@ namespace Backend.CMS.Infrastructure.Services
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync();
-
-            _logger.LogInformation("Password changed for user: {Email}", user.Email);
             return true;
         }
 
@@ -282,6 +233,76 @@ namespace Backend.CMS.Infrastructure.Services
 
             // Generate reset token and send email
             return true;
+        }
+
+        public async Task<bool> AssignRoleAsync(Guid userId, Guid roleId)
+        {
+            try
+            {
+                var user = await _userRepository.GetByIdAsync(userId);
+                var role = await _roleRepository.GetByIdAsync(roleId);
+
+                if (user == null || role == null)
+                    return false;
+
+                // Check if role is already assigned
+                var existingUserRole = await _userRoleRepository.FirstOrDefaultAsync(ur =>
+                    ur.UserId == userId && ur.RoleId == roleId && ur.IsActive);
+
+                if (existingUserRole != null)
+                    return true; // Already assigned
+
+                var userRole = new UserRole
+                {
+                    UserId = userId,
+                    RoleId = roleId,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = "System",
+                    IsActive = true
+                };
+
+                await _userRoleRepository.AddAsync(userRole);
+                await _userRoleRepository.SaveChangesAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error assigning role {RoleId} to user {UserId}", roleId, userId);
+                return false;
+            }
+        }
+
+        public async Task<bool> RemoveRoleAsync(Guid userId, Guid roleId)
+        {
+            try
+            {
+                var userRole = await _userRoleRepository.FirstOrDefaultAsync(ur =>
+                    ur.UserId == userId && ur.RoleId == roleId && ur.IsActive);
+
+                if (userRole == null)
+                    return false;
+
+                userRole.IsActive = false;
+                _userRoleRepository.Update(userRole);
+                await _userRoleRepository.SaveChangesAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error removing role {RoleId} from user {UserId}", roleId, userId);
+                return false;
+            }
+        }
+
+        public async Task<List<RoleDto>> GetUserRolesAsync(Guid userId)
+        {
+            var roles = await _userRepository.GetUserRolesAsync(userId);
+            return _mapper.Map<List<RoleDto>>(roles);
+        }
+
+        public async Task<bool> HasPermissionAsync(Guid userId, string resource, string action)
+        {
+            return await _userRepository.HasPermissionAsync(userId, resource, action);
         }
 
         public async Task<bool> ValidateUserCredentialsAsync(string email, string password)
@@ -328,65 +349,39 @@ namespace Backend.CMS.Infrastructure.Services
             return true;
         }
 
-        public async Task<bool> HasPermissionAsync(Guid userId, string resource, string action)
+        private async Task AssignRolesToUserAsync(Guid userId, List<Guid> roleIds)
         {
-            var user = await _userRepository.GetByIdAsync(userId);
-            if (user == null || !user.IsActive || user.IsLocked)
-                return false;
-
-            // Admin has all permissions
-            if (user.Role == UserRole.Admin)
-                return true;
-
-            // Customer has limited permissions
-            if (user.Role == UserRole.Customer)
+            foreach (var roleId in roleIds)
             {
-                // Define customer permissions here
-                var customerPermissions = new[]
-                {
-                    "Pages.View", // Can view public pages
-                    "Profile.View", "Profile.Update" // Can manage their own profile
-                };
+                await AssignRoleAsync(userId, roleId);
+            }
+        }
 
-                var permission = $"{resource}.{action}";
-                return customerPermissions.Contains(permission);
+        private async Task AssignDefaultRoleAsync(Guid userId)
+        {
+            // Find default "Viewer" role
+            var roles = await _roleRepository.FindAsync(r => r.NormalizedName == "VIEWER");
+            var defaultRole = roles.FirstOrDefault();
+
+            if (defaultRole != null)
+            {
+                await AssignRoleAsync(userId, defaultRole.Id);
+            }
+        }
+
+        private async Task UpdateUserRolesAsync(Guid userId, List<Guid> roleIds)
+        {
+            // Deactivate all current roles
+            var currentUserRoles = await _userRoleRepository.FindAsync(ur => ur.UserId == userId && ur.IsActive);
+            foreach (var userRole in currentUserRoles)
+            {
+                userRole.IsActive = false;
+                _userRoleRepository.Update(userRole);
             }
 
-            return false;
-        }
-
-        public async Task<List<UserRoleInfo>> GetAvailableRolesAsync()
-        {
-            await Task.CompletedTask; // Make async
-            return Enum.GetValues<UserRole>().Select(role => new UserRoleInfo
-            {
-                Value = (int)role,
-                Name = role.ToString(),
-                Description = role switch
-                {
-                    UserRole.Admin => "Full system access - can manage all users, pages, and settings",
-                    UserRole.Customer => "Limited access - can view public pages and manage own profile",
-                    _ => "Unknown role"
-                }
-            }).ToList();
-        }
-
-        public async Task<bool> CanAccessPageAsync(Guid userId, PageAccessLevel pageAccessLevel)
-        {
-            if (pageAccessLevel == PageAccessLevel.Public)
-                return true;
-
-            var user = await _userRepository.GetByIdAsync(userId);
-            if (user == null || !user.IsActive || user.IsLocked)
-                return false;
-
-            if (pageAccessLevel == PageAccessLevel.LoggedInOnly)
-                return true; // Any logged-in user can access
-
-            if (pageAccessLevel == PageAccessLevel.AdminOnly)
-                return user.Role == UserRole.Admin;
-
-            return false;
+            // Assign new roles
+            await AssignRolesToUserAsync(userId, roleIds);
+            await _userRoleRepository.SaveChangesAsync();
         }
     }
 }

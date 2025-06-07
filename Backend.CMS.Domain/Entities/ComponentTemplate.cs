@@ -1,12 +1,14 @@
 ﻿using Backend.CMS.Domain.Common;
+using Backend.CMS.Domain.Common.Interfaces;
 using Backend.CMS.Domain.Enums;
 using System;
 using System.Collections.Generic;
 
 namespace Backend.CMS.Domain.Entities
 {
-    public class ComponentTemplate : BaseEntity
+    public class ComponentTemplate : BaseEntity, ITenantEntity
     {
+        public string TenantId { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
         public string? Description { get; set; }

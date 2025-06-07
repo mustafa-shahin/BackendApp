@@ -1,12 +1,66 @@
-﻿using Backend.CMS.Application.DTOs.Companies;
+﻿// File: Backend.CMS.Infrastructure/Validation/DtoValidators.cs
+using Backend.CMS.Application.DTOs.Companies;
 using Backend.CMS.Application.DTOs.Components;
 using Backend.CMS.Application.DTOs.Pages;
 using Backend.CMS.Application.DTOs.Users;
-using Backend.CMS.Domain.Enums;
 using FluentValidation;
 
 namespace Backend.CMS.Infrastructure.Validation
 {
+    public class CreatePageDtoValidator : AbstractValidator<CreatePageDto>
+    {
+        public CreatePageDtoValidator()
+        {
+            RuleFor(x => x.Name)
+                .NotEmpty().WithMessage("Page name is required")
+                .MaximumLength(200).WithMessage("Page name cannot exceed 200 characters");
+
+            RuleFor(x => x.Title)
+                .NotEmpty().WithMessage("Page title is required")
+                .MaximumLength(200).WithMessage("Page title cannot exceed 200 characters");
+
+            RuleFor(x => x.Slug)
+                .NotEmpty().WithMessage("Page slug is required")
+                .MaximumLength(200).WithMessage("Page slug cannot exceed 200 characters")
+                .Matches(@"^[a-z0-9]+(?:-[a-z0-9]+)*$").WithMessage("Slug must be lowercase letters, numbers, and hyphens only");
+
+            RuleFor(x => x.MetaTitle)
+                .MaximumLength(200).WithMessage("Meta title cannot exceed 200 characters")
+                .When(x => !string.IsNullOrEmpty(x.MetaTitle));
+
+            RuleFor(x => x.MetaDescription)
+                .MaximumLength(500).WithMessage("Meta description cannot exceed 500 characters")
+                .When(x => !string.IsNullOrEmpty(x.MetaDescription));
+        }
+    }
+
+    public class UpdatePageDtoValidator : AbstractValidator<UpdatePageDto>
+    {
+        public UpdatePageDtoValidator()
+        {
+            RuleFor(x => x.Name)
+                .NotEmpty().WithMessage("Page name is required")
+                .MaximumLength(200).WithMessage("Page name cannot exceed 200 characters");
+
+            RuleFor(x => x.Title)
+                .NotEmpty().WithMessage("Page title is required")
+                .MaximumLength(200).WithMessage("Page title cannot exceed 200 characters");
+
+            RuleFor(x => x.Slug)
+                .NotEmpty().WithMessage("Page slug is required")
+                .MaximumLength(200).WithMessage("Page slug cannot exceed 200 characters")
+                .Matches(@"^[a-z0-9]+(?:-[a-z0-9]+)*$").WithMessage("Slug must be lowercase letters, numbers, and hyphens only");
+
+            RuleFor(x => x.MetaTitle)
+                .MaximumLength(200).WithMessage("Meta title cannot exceed 200 characters")
+                .When(x => !string.IsNullOrEmpty(x.MetaTitle));
+
+            RuleFor(x => x.MetaDescription)
+                .MaximumLength(500).WithMessage("Meta description cannot exceed 500 characters")
+                .When(x => !string.IsNullOrEmpty(x.MetaDescription));
+        }
+    }
+
     public class CreateUserDtoValidator : AbstractValidator<CreateUserDto>
     {
         public CreateUserDtoValidator()
@@ -34,9 +88,6 @@ namespace Backend.CMS.Infrastructure.Validation
             RuleFor(x => x.LastName)
                 .NotEmpty().WithMessage("Last name is required")
                 .MaximumLength(100).WithMessage("Last name cannot exceed 100 characters");
-
-            RuleFor(x => x.Role)
-                .IsInEnum().WithMessage("Invalid user role");
         }
     }
 
@@ -62,18 +113,6 @@ namespace Backend.CMS.Infrastructure.Validation
             RuleFor(x => x.LastName)
                 .NotEmpty().WithMessage("Last name is required")
                 .MaximumLength(100).WithMessage("Last name cannot exceed 100 characters");
-
-            RuleFor(x => x.Role)
-                .IsInEnum().WithMessage("Invalid user role");
-        }
-    }
-
-    public class ChangeUserRoleDtoValidator : AbstractValidator<ChangeUserRoleDto>
-    {
-        public ChangeUserRoleDtoValidator()
-        {
-            RuleFor(x => x.Role)
-                .IsInEnum().WithMessage("Invalid user role");
         }
     }
 
@@ -105,115 +144,6 @@ namespace Backend.CMS.Infrastructure.Validation
             RuleFor(x => x.ConfirmPassword)
                 .NotEmpty().WithMessage("Confirm password is required")
                 .Equal(x => x.NewPassword).WithMessage("Passwords do not match");
-        }
-    }
-
-    public class CreatePageDtoValidator : AbstractValidator<CreatePageDto>
-    {
-        public CreatePageDtoValidator()
-        {
-            RuleFor(x => x.Name)
-                .NotEmpty().WithMessage("Page name is required")
-                .MaximumLength(200).WithMessage("Page name cannot exceed 200 characters");
-
-            RuleFor(x => x.Title)
-                .NotEmpty().WithMessage("Page title is required")
-                .MaximumLength(200).WithMessage("Page title cannot exceed 200 characters");
-
-            RuleFor(x => x.Slug)
-                .NotEmpty().WithMessage("Page slug is required")
-                .MaximumLength(200).WithMessage("Page slug cannot exceed 200 characters")
-                .Matches(@"^[a-z0-9]+(?:-[a-z0-9]+)*$").WithMessage("Slug must be lowercase letters, numbers, and hyphens only");
-
-            RuleFor(x => x.Status)
-                .IsInEnum().WithMessage("Invalid page status");
-
-            RuleFor(x => x.AccessLevel)
-                .IsInEnum().WithMessage("Invalid page access level");
-
-            RuleFor(x => x.MetaTitle)
-                .MaximumLength(200).WithMessage("Meta title cannot exceed 200 characters")
-                .When(x => !string.IsNullOrEmpty(x.MetaTitle));
-
-            RuleFor(x => x.MetaDescription)
-                .MaximumLength(500).WithMessage("Meta description cannot exceed 500 characters")
-                .When(x => !string.IsNullOrEmpty(x.MetaDescription));
-        }
-    }
-
-    public class UpdatePageDtoValidator : AbstractValidator<UpdatePageDto>
-    {
-        public UpdatePageDtoValidator()
-        {
-            RuleFor(x => x.Name)
-                .NotEmpty().WithMessage("Page name is required")
-                .MaximumLength(200).WithMessage("Page name cannot exceed 200 characters");
-
-            RuleFor(x => x.Title)
-                .NotEmpty().WithMessage("Page title is required")
-                .MaximumLength(200).WithMessage("Page title cannot exceed 200 characters");
-
-            RuleFor(x => x.Slug)
-                .NotEmpty().WithMessage("Page slug is required")
-                .MaximumLength(200).WithMessage("Page slug cannot exceed 200 characters")
-                .Matches(@"^[a-z0-9]+(?:-[a-z0-9]+)*$").WithMessage("Slug must be lowercase letters, numbers, and hyphens only");
-
-            RuleFor(x => x.Status)
-                .IsInEnum().WithMessage("Invalid page status");
-
-            RuleFor(x => x.AccessLevel)
-                .IsInEnum().WithMessage("Invalid page access level");
-
-            RuleFor(x => x.MetaTitle)
-                .MaximumLength(200).WithMessage("Meta title cannot exceed 200 characters")
-                .When(x => !string.IsNullOrEmpty(x.MetaTitle));
-
-            RuleFor(x => x.MetaDescription)
-                .MaximumLength(500).WithMessage("Meta description cannot exceed 500 characters")
-                .When(x => !string.IsNullOrEmpty(x.MetaDescription));
-        }
-    }
-
-    public class SavePageStructureDtoValidator : AbstractValidator<SavePageStructureDto>
-    {
-        public SavePageStructureDtoValidator()
-        {
-            RuleFor(x => x.PageId)
-                .NotEmpty().WithMessage("Page ID is required");
-
-            RuleFor(x => x.Components)
-                .NotNull().WithMessage("Components list cannot be null");
-
-            RuleForEach(x => x.Components)
-                .SetValidator(new PageComponentDtoValidator());
-        }
-    }
-
-    public class PageComponentDtoValidator : AbstractValidator<PageComponentDto>
-    {
-        public PageComponentDtoValidator()
-        {
-            RuleFor(x => x.Type)
-                .IsInEnum().WithMessage("Invalid component type");
-
-            RuleFor(x => x.Name)
-                .NotEmpty().WithMessage("Component name is required")
-                .MaximumLength(200).WithMessage("Component name cannot exceed 200 characters");
-
-            RuleFor(x => x.Order)
-                .GreaterThanOrEqualTo(0).WithMessage("Order must be greater than or equal to 0");
-
-            RuleFor(x => x.Properties)
-                .NotNull().WithMessage("Properties cannot be null");
-
-            RuleFor(x => x.Styles)
-                .NotNull().WithMessage("Styles cannot be null");
-
-            RuleFor(x => x.Content)
-                .NotNull().WithMessage("Content cannot be null");
-
-            RuleForEach(x => x.ChildComponents)
-                .SetValidator(new PageComponentDtoValidator());
         }
     }
 
@@ -412,6 +342,49 @@ namespace Backend.CMS.Infrastructure.Validation
             RuleFor(x => x.Icon)
                 .MaximumLength(100).WithMessage("Icon cannot exceed 100 characters")
                 .When(x => !string.IsNullOrEmpty(x.Icon));
+        }
+    }
+
+    public class SavePageStructureDtoValidator : AbstractValidator<SavePageStructureDto>
+    {
+        public SavePageStructureDtoValidator()
+        {
+            RuleFor(x => x.PageId)
+                .NotEmpty().WithMessage("Page ID is required");
+
+            RuleFor(x => x.Components)
+                .NotNull().WithMessage("Components list cannot be null");
+
+            RuleForEach(x => x.Components)
+                .SetValidator(new PageComponentDtoValidator());
+        }
+    }
+
+    public class PageComponentDtoValidator : AbstractValidator<PageComponentDto>
+    {
+        public PageComponentDtoValidator()
+        {
+            RuleFor(x => x.Type)
+                .IsInEnum().WithMessage("Invalid component type");
+
+            RuleFor(x => x.Name)
+                .NotEmpty().WithMessage("Component name is required")
+                .MaximumLength(200).WithMessage("Component name cannot exceed 200 characters");
+
+            RuleFor(x => x.Order)
+                .GreaterThanOrEqualTo(0).WithMessage("Order must be greater than or equal to 0");
+
+            RuleFor(x => x.Properties)
+                .NotNull().WithMessage("Properties cannot be null");
+
+            RuleFor(x => x.Styles)
+                .NotNull().WithMessage("Styles cannot be null");
+
+            RuleFor(x => x.Content)
+                .NotNull().WithMessage("Content cannot be null");
+
+            RuleForEach(x => x.ChildComponents)
+                .SetValidator(new PageComponentDtoValidator());
         }
     }
 }

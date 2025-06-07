@@ -1,11 +1,13 @@
 ﻿using Backend.CMS.Domain.Common;
+using Backend.CMS.Domain.Common.Interfaces;
 using System;
 using System.Collections.Generic;
 
 namespace Backend.CMS.Domain.Entities
 {
-    public class Company : BaseEntity
+    public class Company : BaseEntity, ITenantEntity
     {
+        public string TenantId { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public string? Website { get; set; }
